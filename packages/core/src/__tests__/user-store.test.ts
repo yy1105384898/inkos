@@ -194,6 +194,21 @@ describe("user-store", () => {
     await expect(readdir(aliceBookDir)).rejects.toThrow();
   });
 
+  it("transferBookOwnership accepts Chinese book ids", async () => {
+    await createUser(dataRoot, { username: "alice", password: "hunter22" });
+    await createUser(dataRoot, { username: "bob", password: "hunter22" });
+    const bookId = "运潮帝道-布局苍生-举国证仙";
+    const aliceBookDir = join(userProjectRoot(dataRoot, "alice"), "books", bookId);
+    await mkdir(aliceBookDir, { recursive: true });
+    await writeFile(join(aliceBookDir, "book.json"), "{}");
+
+    await transferBookOwnership(dataRoot, "alice", "bob", bookId);
+
+    const bobBook = await readdir(join(userProjectRoot(dataRoot, "bob"), "books"));
+    expect(bobBook).toContain(bookId);
+    await expect(readdir(aliceBookDir)).rejects.toThrow();
+  });
+
   it("transferBookOwnership refuses to overwrite existing target", async () => {
     await createUser(dataRoot, { username: "alice", password: "hunter22" });
     await createUser(dataRoot, { username: "bob", password: "hunter22" });
