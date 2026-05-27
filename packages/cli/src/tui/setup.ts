@@ -12,8 +12,8 @@ import { resolveTuiLocale, type TuiLocale } from "./i18n.js";
 import { GLOBAL_ENV_PATH, loadConfig } from "../utils.js";
 import { ensureProjectGitignore } from "../project-bootstrap.js";
 
-const PROVIDERS = ["openai", "anthropic", "kkaiapi", "custom"] as const;
-const KKAIAPI_BASE_URL = "https://api.kkaiapi.com/v1";
+const PROVIDERS = ["openai", "anthropic", "yynewapi", "custom"] as const;
+const YYNEWAPI_BASE_URL = "https://yynewapi.yangyangnj.top/v1";
 type SetupProvider = typeof PROVIDERS[number];
 type RuntimeProvider = "openai" | "anthropic" | "custom";
 
@@ -34,8 +34,8 @@ export function resolveSetupProvider(provider: string, baseUrl: string): Runtime
 export function resolveSetupService(provider: string, baseUrl: string): string | undefined {
   const normalizedProvider = provider.trim().toLowerCase();
   const normalizedUrl = baseUrl.trim().toLowerCase();
-  if (normalizedProvider === "kkaiapi" || normalizedUrl.includes("api.kkaiapi.com")) {
-    return "kkaiapi";
+  if (normalizedProvider === "yynewapi" || normalizedUrl.includes("yynewapi.yangyangnj.top")) {
+    return "yynewapi";
   }
   return undefined;
 }
@@ -87,7 +87,7 @@ export function buildInteractiveSetupCopy(locale: TuiLocale): InteractiveSetupCo
         scope: "Save scope",
       },
       hints: {
-        provider: "openai / anthropic / kkaiapi / custom (OpenAI-compatible proxy)",
+        provider: "openai / anthropic / yynewapi / custom (OpenAI-compatible proxy)",
         baseUrl: "Your API endpoint",
         apiKey: "Paste the API key for the selected provider.",
         model: "e.g. gpt-4o, claude-sonnet-4-20250514, deepseek-chat",
@@ -117,7 +117,7 @@ export function buildInteractiveSetupCopy(locale: TuiLocale): InteractiveSetupCo
       scope: "保存范围",
     },
     hints: {
-      provider: "openai / anthropic / kkaiapi / custom（兼容 OpenAI 的代理）",
+      provider: "openai / anthropic / yynewapi / custom（兼容 OpenAI 的代理）",
       baseUrl: "你的 API 入口地址",
       apiKey: "粘贴所选服务商的 API Key",
       model: "例如 gpt-5.4、claude-sonnet-4-20250514、deepseek-chat",
@@ -192,7 +192,7 @@ export async function interactiveLlmSetup(
     const provider = PROVIDERS.includes(providerInput.trim() as SetupProvider)
       ? providerInput.trim() as SetupProvider
       : copy.defaults.provider as SetupProvider;
-    const providerDefaultBaseUrl = provider === "kkaiapi" ? KKAIAPI_BASE_URL : copy.defaults.baseUrl;
+    const providerDefaultBaseUrl = provider === "yynewapi" ? YYNEWAPI_BASE_URL : copy.defaults.baseUrl;
     console.log(`     ${c("✓", brightGreen)} ${provider}`);
     console.log();
 
@@ -225,7 +225,7 @@ export async function interactiveLlmSetup(
     console.log(c(`     ${copy.hints.scope}`, dim));
     const scope = await rl.question(`     ${c("❯", cyan)} ${c(copy.defaults.scope, dim)} `);
     const useGlobal = scope.trim().toLowerCase() !== "project";
-    const effectiveBaseUrl = baseUrl.trim() || (provider === "kkaiapi" ? providerDefaultBaseUrl : "");
+    const effectiveBaseUrl = baseUrl.trim() || (provider === "yynewapi" ? providerDefaultBaseUrl : "");
     const finalProvider = resolveSetupProvider(provider, effectiveBaseUrl);
     const finalService = resolveSetupService(provider, effectiveBaseUrl);
 

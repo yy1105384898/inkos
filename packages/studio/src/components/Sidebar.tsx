@@ -226,8 +226,8 @@ export function Sidebar({ nav, activePage, sse, t }: {
             <ScrollText size={18} />
           </div>
           <div className="flex flex-col">
-            <span className="font-serif text-xl leading-none italic font-medium">InkOS</span>
-            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-bold mt-1">Studio</span>
+            <span className="font-serif text-xl leading-none italic font-medium">YANGYANG</span>
+            <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-bold mt-1">小说 Agent</span>
           </div>
         </button>
       </div>

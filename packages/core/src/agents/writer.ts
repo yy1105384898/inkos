@@ -364,6 +364,7 @@ export class WriterAgent extends BaseAgent {
       settlement.runtimeStateDelta,
       resolvedLanguage,
       chapterNumber,
+      true,
     );
     const resolvedRuntimeStateDelta = runtimeStateArtifacts?.resolvedDelta ?? settlement.runtimeStateDelta;
     const priorHookIds = new Set(parsePendingHooksMarkdown(hooks).map((hook) => hook.hookId));

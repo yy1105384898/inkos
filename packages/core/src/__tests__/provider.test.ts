@@ -181,7 +181,7 @@ describe("chatCompletion via pi-ai", () => {
 
     expect(error.message).toContain("API 返回 400");
     expect(error.message).toContain("temperature");
-    expect(error.message).not.toMatch(/kkaiapi/i);
+    expect(error.message).not.toMatch(/yynewapi/i);
   });
 
   it("wraps 401 errors with an unauthorized message", async () => {
@@ -204,7 +204,7 @@ describe("chatCompletion via pi-ai", () => {
     );
 
     expect(error.message).toContain("无法连接到 API 服务");
-    expect(error.message).not.toMatch(/kkaiapi/i);
+    expect(error.message).not.toMatch(/yynewapi/i);
   });
 
   it("retries transient socket termination errors before failing the chapter pipeline", async () => {
@@ -345,7 +345,7 @@ describe("chatCompletion via pi-ai", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses native fetch transport for kkaiapi chat and sanitizes headers", async () => {
+  it("uses native fetch transport for yynewapi chat and sanitizes headers", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -356,12 +356,12 @@ describe("chatCompletion via pi-ai", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = makeClient(0.7, {
-      service: "kkaiapi",
+      service: "yynewapi",
       stream: false,
       _piModel: {
         ...MOCK_PI_MODEL,
         provider: "openai",
-        baseUrl: "https://api.kkaiapi.com/v1",
+        baseUrl: "https://yynewapi.yangyangnj.top/v1",
         headers: {
           "X-Valid": "ok",
           "X-Bad": "服务测试",

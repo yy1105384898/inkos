@@ -45,7 +45,7 @@ export const SERVICE_PRESETS: Record<string, ServicePreset> = {
   siliconflow: { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://api.siliconflow.cn/v1",                      label: "硅基流动" },
   ppio:        { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://api.ppinfra.com/v3/openai",                  label: "PPIO" },
   openrouter:  { providerFamily: "openai",    api: "openai-responses",   baseUrl: "https://openrouter.ai/api/v1",                       label: "OpenRouter",      piProvider: "openrouter" },
-  kkaiapi:     { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://api.kkaiapi.com/v1",                         label: "kkaiapi",         modelsBaseUrl: "https://api.kkaiapi.com/v1" },
+  yynewapi:     { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://yynewapi.yangyangnj.top/v1",                         label: "yynewapi",         modelsBaseUrl: "https://yynewapi.yangyangnj.top/v1" },
   ollama:      { providerFamily: "openai",    api: "openai-completions", baseUrl: "http://localhost:11434/v1",                          label: "Ollama (本地)" },
   custom:      { providerFamily: "openai",    api: "openai-completions", baseUrl: "",                                                    label: "自定义端点" },
 };
@@ -179,6 +179,7 @@ export async function listModelsForService(
         const card = lookupModel(service, m.id);
         byId.set(m.id, card ? toModelInfo(card) : { id: m.id, name: m.name, contextWindow: m.contextWindow });
       }
+      return Array.from(byId.values());
     }
   }
 

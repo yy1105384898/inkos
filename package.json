@@ -1,8 +1,8 @@
 {
-  "name": "inkos",
+  "name": "yangyang-novel-agent",
   "version": "1.4.1",
   "private": true,
-  "description": "Autonomous AI novel writing CLI agent — 10-agent pipeline that writes, audits, and revises novels with continuity tracking",
+  "description": "YANGYANG 小说 Agent — secondary development of InkOS for a cloud Studio novel writing agent",
   "keywords": [
     "ai-novel-writing",
     "ai-writing-agent",
@@ -18,7 +18,7 @@
   "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Narcooo/inkos"
+    "url": "https://github.com/yy1105384898/inkos"
   },
   "scripts": {
     "build": "pnpm -r build",

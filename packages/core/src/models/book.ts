@@ -52,6 +52,21 @@ export type BookStatus = z.infer<typeof BookStatusSchema>;
 export const FanficModeSchema = z.enum(["canon", "au", "ooc", "cp"]);
 export type FanficMode = z.infer<typeof FanficModeSchema>;
 
+export const WritingQualityFormSchema = z.enum(["serial", "short", "balanced"]);
+export type WritingQualityForm = z.infer<typeof WritingQualityFormSchema>;
+
+export const WritingQualityIntensitySchema = z.enum(["light", "standard", "strict"]);
+export type WritingQualityIntensity = z.infer<typeof WritingQualityIntensitySchema>;
+
+export const WritingQualityProfileSchema = z.object({
+  profile: z.literal("zh-webnovel-v1").optional(),
+  form: WritingQualityFormSchema.default("serial"),
+  platform: PlatformSchema.default("other"),
+  intensity: WritingQualityIntensitySchema.default("standard"),
+});
+
+export type WritingQualityProfile = z.infer<typeof WritingQualityProfileSchema>;
+
 export const BookConfigSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -65,6 +80,7 @@ export const BookConfigSchema = z.object({
   updatedAt: z.string().datetime(),
   parentBookId: z.string().optional(),
   fanficMode: FanficModeSchema.optional(),
+  writingQuality: WritingQualityProfileSchema.optional(),
 });
 
 export type BookConfig = z.infer<typeof BookConfigSchema>;

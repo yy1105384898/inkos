@@ -43,20 +43,20 @@ describe("service-presets regression", () => {
   });
 
   describe("listModelsForService", () => {
-    it("exposes kkaiapi as an OpenAI-compatible aggregator with text models", async () => {
-      const preset = resolveServicePreset("kkaiapi");
+    it("exposes yynewapi as an OpenAI-compatible aggregator with text models", async () => {
+      const preset = resolveServicePreset("yynewapi");
       expect(preset).toMatchObject({
         providerFamily: "openai",
         api: "openai-completions",
-        baseUrl: "https://api.kkaiapi.com/v1",
+        baseUrl: "https://yynewapi.yangyangnj.top/v1",
       });
-      const models = await listModelsForService("kkaiapi");
+      const models = await listModelsForService("yynewapi");
       expect(models.map((m) => m.id)).toEqual(expect.arrayContaining([
         "gpt-5.5",
         "deepseek-v4-flash",
         "deepseek-v4-pro",
       ]));
-      expect(guessServiceFromBaseUrl("https://api.kkaiapi.com/v1")).toBe("kkaiapi");
+      expect(guessServiceFromBaseUrl("https://yynewapi.yangyangnj.top/v1")).toBe("yynewapi");
     });
 
     it("returns provider bank models for minimax (B8 升级：provider.models 替代 preset.knownModels)", async () => {

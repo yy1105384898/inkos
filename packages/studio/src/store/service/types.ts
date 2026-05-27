@@ -10,6 +10,7 @@ export interface ServiceInfo {
   readonly label: string;
   readonly group?: EndpointGroup;
   readonly connected: boolean;
+  readonly scope?: "browser";
 }
 
 export interface ModelInfo {

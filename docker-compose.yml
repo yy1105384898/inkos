@@ -1,0 +1,15 @@
+services:
+  yangyang-novel-agent:
+    build:
+      context: .
+      target: runner
+    image: yangyang/novel-agent:local
+    container_name: yangyang-novel-agent
+    restart: unless-stopped
+    ports:
+      - "4567:4567"
+    environment:
+      INKOS_STUDIO_PORT: "4567"
+      INKOS_PROJECT_ROOT: "/data"
+    volumes:
+      - ./data:/data

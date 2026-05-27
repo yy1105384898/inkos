@@ -1,4 +1,5 @@
 import { fetchJson, useApi, postApi } from "../hooks/use-api";
+import { withBrowserLlmOverride } from "../lib/browser-service-config";
 import { useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
@@ -140,7 +141,7 @@ export function BookDetail({
   const handleWriteNext = async () => {
     setWriteRequestPending(true);
     try {
-      await postApi(`/books/${bookId}/write-next`);
+      await postApi(`/books/${bookId}/write-next`, withBrowserLlmOverride({}));
     } catch (e) {
       setWriteRequestPending(false);
       alert(e instanceof Error ? e.message : "Failed");
@@ -150,7 +151,7 @@ export function BookDetail({
   const handleDraft = async () => {
     setDraftRequestPending(true);
     try {
-      await postApi(`/books/${bookId}/draft`);
+      await postApi(`/books/${bookId}/draft`, withBrowserLlmOverride({}));
     } catch (e) {
       setDraftRequestPending(false);
       alert(e instanceof Error ? e.message : "Failed");
@@ -187,7 +188,7 @@ export function BookDetail({
       await fetchJson(`/books/${bookId}/rewrite/${chapterNum}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: brief.trim() || undefined }),
+        body: JSON.stringify(withBrowserLlmOverride({ brief: brief.trim() || undefined })),
       });
       refetch();
     } catch (e) {
@@ -210,7 +211,7 @@ export function BookDetail({
       await fetchJson(`/books/${bookId}/revise/${chapterNum}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, brief: brief.trim() || undefined }),
+        body: JSON.stringify(withBrowserLlmOverride({ mode, brief: brief.trim() || undefined })),
       });
       refetch();
     } catch (e) {
@@ -233,7 +234,7 @@ export function BookDetail({
       await fetchJson(`/books/${bookId}/resync/${chapterNum}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief: brief.trim() || undefined }),
+        body: JSON.stringify(withBrowserLlmOverride({ brief: brief.trim() || undefined })),
       });
       refetch();
     } catch (e) {
@@ -567,7 +568,11 @@ export function BookDetail({
                       <button
                         onClick={async () => {
                           try {
-                            const auditResult = await fetchJson<{ passed?: boolean; issues?: unknown[] }>(`/books/${bookId}/audit/${ch.number}`, { method: "POST" });
+                            const auditResult = await fetchJson<{ passed?: boolean; issues?: unknown[] }>(`/books/${bookId}/audit/${ch.number}`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(withBrowserLlmOverride({})),
+                            });
                             alert(auditResult.passed ? "Audit passed" : `Audit failed: ${auditResult.issues?.length ?? 0} issues`);
                             refetch();
                           } catch (e) {

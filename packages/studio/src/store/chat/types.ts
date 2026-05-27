@@ -68,6 +68,7 @@ export interface SessionSummary {
 }
 
 export interface AgentResponse {
+  readonly background?: boolean;
   readonly response?: string;
   readonly error?: string | { code?: string; message?: string };
   readonly details?: {

@@ -44,6 +44,18 @@ describe("listModelsForService (B8)", () => {
     expect(models.some((m) => m.id === "my-proxy-model")).toBe(true);
   });
 
+  it("live /models 成功时不混入 provider 内置模型", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "gpt-live-only" }] }),
+    } as any) as typeof fetch;
+
+    const models = await listModelsForService("yynewapi", "sk-test");
+
+    expect(models.map((m) => m.id)).toEqual(["gpt-live-only"]);
+    expect(models.some((m) => m.id === "deepseek-v4-flash")).toBe(false);
+  });
+
   it("ollama 无 apiKey 时也探测本地 /models 并保留本地动态模型", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

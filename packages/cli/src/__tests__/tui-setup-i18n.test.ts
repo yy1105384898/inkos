@@ -7,8 +7,8 @@ describe("tui setup i18n", () => {
     expect(copy.title).toBe("模型配置");
     expect(copy.subtitle).toContain("配置模型服务");
     expect(copy.steps.provider).toBe("服务提供方");
-    expect(copy.hints.provider).toContain("kkaiapi");
-    expect(copy.hints.apiKey).not.toMatch(/kkaiapi/i);
+    expect(copy.hints.provider).toContain("yynewapi");
+    expect(copy.hints.apiKey).not.toMatch(/yynewapi/i);
     expect(copy.steps.scope).toBe("保存范围");
     expect(copy.scopeChoices.project).toBe("当前目录");
   });
@@ -23,9 +23,9 @@ describe("tui setup i18n", () => {
     expect(resolveSetupProvider("openai", "https://api.kimi.com/coding/v1")).toBe("anthropic");
   });
 
-  it("keeps kkaiapi as a service while using the OpenAI-compatible transport", () => {
-    expect(resolveSetupProvider("kkaiapi", "https://api.kkaiapi.com/v1")).toBe("openai");
-    expect(resolveSetupService("kkaiapi", "")).toBe("kkaiapi");
-    expect(resolveSetupService("openai", "https://api.kkaiapi.com/v1")).toBe("kkaiapi");
+  it("keeps yynewapi as a service while using the OpenAI-compatible transport", () => {
+    expect(resolveSetupProvider("yynewapi", "https://yynewapi.yangyangnj.top/v1")).toBe("openai");
+    expect(resolveSetupService("yynewapi", "")).toBe("yynewapi");
+    expect(resolveSetupService("openai", "https://yynewapi.yangyangnj.top/v1")).toBe("yynewapi");
   });
 });

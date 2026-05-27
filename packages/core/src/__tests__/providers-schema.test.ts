@@ -110,7 +110,7 @@ describe("providers structural integrity", () => {
 
   it("B4：海外/本地/自定义/聚合/GH 全部收录（8 个）", () => {
     const ids = getAllEndpoints().map((p) => p.id);
-    for (const id of ["ollama", "openrouter", "custom", "mistral", "xai", "newapi", "githubCopilot", "kkaiapi"]) {
+    for (const id of ["ollama", "openrouter", "custom", "mistral", "xai", "newapi", "githubCopilot", "yynewapi"]) {
       expect(ids).toContain(id);
     }
   });

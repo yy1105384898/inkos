@@ -1,5 +1,5 @@
 // Models
-export { type BookConfig, type Platform, type Genre, type BookStatus, type FanficMode, BookConfigSchema, PlatformSchema, GenreSchema, BookStatusSchema, FanficModeSchema, normalizePlatformId, normalizePlatformOrOther } from "./models/book.js";
+export { type BookConfig, type Platform, type Genre, type BookStatus, type FanficMode, type WritingQualityForm, type WritingQualityIntensity, type WritingQualityProfile, BookConfigSchema, PlatformSchema, GenreSchema, BookStatusSchema, FanficModeSchema, WritingQualityFormSchema, WritingQualityIntensitySchema, WritingQualityProfileSchema, normalizePlatformId, normalizePlatformOrOther } from "./models/book.js";
 export { type ChapterMeta, type ChapterStatus, ChapterMetaSchema, ChapterStatusSchema } from "./models/chapter.js";
 export { type ProjectConfig, type LLMConfig, type NotifyChannel, type DetectionConfig, type QualityGates, type FoundationConfig, type WritingConfig, type AgentLLMOverride, type InputGovernanceMode, ProjectConfigSchema, LLMConfigSchema, AgentLLMOverrideSchema, DetectionConfigSchema, QualityGatesSchema, FoundationConfigSchema, WritingConfigSchema, InputGovernanceModeSchema } from "./models/project.js";
 export { type CurrentState, type ParticleLedger, type PendingHooks, type PendingHook, type LedgerEntry } from "./models/state.js";
@@ -309,6 +309,8 @@ export { parseSettlerDeltaOutput, type SettlerDeltaOutput } from "./agents/settl
 export { FanficCanonImporter, type FanficCanonOutput } from "./agents/fanfic-canon-importer.js";
 export { getFanficDimensionConfig, FANFIC_DIMENSIONS, type FanficDimensionConfig } from "./agents/fanfic-dimensions.js";
 export { buildFanficCanonSection, buildCharacterVoiceProfiles, buildFanficModeInstructions } from "./agents/fanfic-prompt-sections.js";
+export { buildQualityRuleSet, buildQualityAuditPrompt, type QualityRule, type QualityRuleSet, type QualityAuditResult, type QualityIssue } from "./agents/zh-webnovel-quality.js";
+export { ZhWebnovelQualityAuditor, type AuditChapterInput, type AuditChapterOutput } from "./agents/zh-webnovel-quality-auditor.js";
 export * from "./prompts/index.js";
 
 // Utils

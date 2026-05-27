@@ -50,6 +50,7 @@ export interface ShortFictionRunOptions {
   readonly coverModel?: string;
   readonly coverSize?: string;
   readonly coverApiKeyEnv?: string;
+  readonly coverApiKey?: string;
   readonly onProgress?: (message: string) => void;
 }
 
@@ -78,6 +79,7 @@ export interface ShortFictionCoverOptions {
   readonly coverModel?: string;
   readonly coverSize?: string;
   readonly coverApiKeyEnv?: string;
+  readonly coverApiKey?: string;
 }
 
 export interface ShortFictionCoverResult {
@@ -195,6 +197,7 @@ export async function runShortFictionProduction(
         coverModel: options.coverModel,
         coverSize: options.coverSize,
         coverApiKeyEnv: options.coverApiKeyEnv,
+        coverApiKey: options.coverApiKey,
       }).catch((error: unknown) => ({ coverError: String(error) }));
 
   return {
@@ -239,6 +242,7 @@ export async function generateShortFictionCover(
     coverModel: options.coverModel,
     coverSize: options.coverSize,
     coverApiKeyEnv: options.coverApiKeyEnv,
+    coverApiKey: options.coverApiKey,
   });
 
   return {
@@ -312,6 +316,7 @@ async function generateCoverArtifact(input: {
   readonly coverModel?: string;
   readonly coverSize?: string;
   readonly coverApiKeyEnv?: string;
+  readonly coverApiKey?: string;
 }): Promise<{ readonly coverImagePath: string }> {
   return generateCoverImageArtifact({
     ...input,
@@ -328,6 +333,7 @@ async function generateCoverImageArtifact(input: {
   readonly coverModel?: string;
   readonly coverSize?: string;
   readonly coverApiKeyEnv?: string;
+  readonly coverApiKey?: string;
 }): Promise<{ readonly coverImagePath: string }> {
   const request = await resolveCoverGenerationRequest({
     root: input.root,
@@ -335,6 +341,7 @@ async function generateCoverImageArtifact(input: {
     coverEndpoint: input.coverEndpoint,
     coverModel: input.coverModel,
     coverApiKeyEnv: input.coverApiKeyEnv,
+    coverApiKey: input.coverApiKey,
   });
   const size = input.coverSize || process.env.INKOS_COVER_SIZE || "1024x1360";
 
@@ -403,6 +410,7 @@ export async function resolveCoverGenerationRequest(input: {
   readonly coverEndpoint?: string;
   readonly coverModel?: string;
   readonly coverApiKeyEnv?: string;
+  readonly coverApiKey?: string;
 }): Promise<ShortFictionCoverRequest> {
   if (input.coverEndpoint || input.coverBaseUrl || process.env.INKOS_COVER_ENDPOINT || process.env.INKOS_COVER_BASE_URL) {
     const endpoint = resolveCoverEndpoint(input.coverEndpoint, input.coverBaseUrl);
@@ -414,7 +422,7 @@ export async function resolveCoverGenerationRequest(input: {
       baseUrl,
       endpoint,
       model: input.coverModel || process.env.INKOS_COVER_MODEL || "gpt-image-2",
-      apiKey: resolveCoverApiKey(input.coverApiKeyEnv || "INKOS_COVER_API_KEY"),
+      apiKey: input.coverApiKey || resolveCoverApiKey(input.coverApiKeyEnv || "INKOS_COVER_API_KEY"),
     };
   }
 
@@ -427,7 +435,7 @@ export async function resolveCoverGenerationRequest(input: {
   if (!preset) {
     throw new Error(`Unsupported cover service: ${projectCover.service}`);
   }
-  const apiKey = await resolveProjectCoverApiKey(input.root, projectCover.service);
+  const apiKey = input.coverApiKey || await resolveProjectCoverApiKey(input.root, projectCover.service);
   if (!apiKey) {
     throw new Error(`Cover API key is required. Configure a cover key for ${preset.label}.`);
   }

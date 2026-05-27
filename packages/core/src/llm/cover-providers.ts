@@ -1,4 +1,4 @@
-export type CoverProviderId = "kkaiapi" | "openai" | "google";
+export type CoverProviderId = "yynewapi" | "openai" | "google";
 
 export interface CoverProviderPreset {
   readonly service: CoverProviderId;
@@ -11,9 +11,9 @@ export interface CoverProviderPreset {
 
 export const COVER_PROVIDER_PRESETS: readonly CoverProviderPreset[] = [
   {
-    service: "kkaiapi",
-    label: "kkaiapi",
-    baseUrl: "https://api.kkaiapi.com/v1",
+    service: "yynewapi",
+    label: "yynewapi",
+    baseUrl: "https://yynewapi.yangyangnj.top/v1",
     api: "images",
     defaultModel: "gpt-image-2",
     models: ["gpt-image-2"],

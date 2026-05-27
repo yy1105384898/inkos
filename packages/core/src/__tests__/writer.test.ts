@@ -665,6 +665,132 @@ describe("WriterAgent", () => {
     }
   });
 
+  it("replaces runtime state for the same chapter when a chapter is regenerated", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inkos-writer-runtime-state-rewrite-test-"));
+    const bookDir = join(root, "book");
+    const stateDir = join(bookDir, "story", "state");
+    const chaptersDir = join(bookDir, "chapters");
+    await mkdir(stateDir, { recursive: true });
+    await mkdir(chaptersDir, { recursive: true });
+
+    await Promise.all([
+      writeFile(join(chaptersDir, "index.json"), JSON.stringify([
+        { number: 1, title: "Old Opening", status: "approved" },
+      ]), "utf-8"),
+      writeFile(join(stateDir, "manifest.json"), JSON.stringify({
+        schemaVersion: 2,
+        language: "en",
+        lastAppliedChapter: 1,
+        projectionVersion: 1,
+        migrationWarnings: [],
+      }), "utf-8"),
+      writeFile(join(stateDir, "current_state.json"), JSON.stringify({
+        chapter: 1,
+        facts: [],
+      }), "utf-8"),
+      writeFile(join(stateDir, "hooks.json"), JSON.stringify({ hooks: [] }), "utf-8"),
+      writeFile(join(stateDir, "chapter_summaries.json"), JSON.stringify({
+        rows: [{
+          chapter: 1,
+          title: "Old Opening",
+          characters: "Lin Yue",
+          events: "Old opening event.",
+          stateChanges: "Old state.",
+          hookActivity: "none",
+          mood: "flat",
+          chapterType: "opening",
+        }],
+      }), "utf-8"),
+    ]);
+
+    const agent = new WriterAgent({
+      client: {
+        provider: "openai",
+        apiFormat: "chat",
+        stream: false,
+        defaults: {
+          temperature: 0.7,
+          maxTokens: 4096,
+          thinkingBudget: 0,
+          extra: {},
+        },
+      },
+      model: "test-model",
+      projectRoot: root,
+    });
+
+    vi.spyOn(WriterAgent.prototype as never, "chat" as never)
+      .mockResolvedValueOnce({
+        content: [
+          "=== CHAPTER_TITLE ===",
+          "New Opening",
+          "",
+          "=== CHAPTER_CONTENT ===",
+          "Lin Yue opens the ledger again.",
+          "",
+          "=== PRE_WRITE_CHECK ===",
+          "- ok",
+        ].join("\n"),
+        usage: ZERO_USAGE,
+      })
+      .mockResolvedValueOnce({
+        content: "=== OBSERVATIONS ===\n- observed",
+        usage: ZERO_USAGE,
+      })
+      .mockResolvedValueOnce({
+        content: [
+          "=== POST_SETTLEMENT ===",
+          "- opening replaced",
+          "",
+          "=== RUNTIME_STATE_DELTA ===",
+          "```json",
+          JSON.stringify({
+            chapter: 1,
+            hookOps: { upsert: [], resolve: [], defer: [] },
+            chapterSummary: {
+              chapter: 1,
+              title: "New Opening",
+              characters: "Lin Yue",
+              events: "Lin Yue opens the ledger again.",
+              stateChanges: "The opening is replaced.",
+              hookActivity: "none",
+              mood: "tense",
+              chapterType: "opening",
+            },
+            notes: [],
+          }),
+          "```",
+        ].join("\n"),
+        usage: ZERO_USAGE,
+      });
+
+    try {
+      const output = await agent.writeChapter({
+        book: {
+          id: "rewrite-book",
+          title: "Rewrite Book",
+          platform: "tomato",
+          genre: "xuanhuan",
+          status: "active",
+          targetChapters: 20,
+          chapterWordCount: 2200,
+          language: "en",
+          createdAt: "2026-03-25T00:00:00.000Z",
+          updatedAt: "2026-03-25T00:00:00.000Z",
+        },
+        bookDir,
+        chapterNumber: 1,
+        lengthSpec: buildLengthSpec(2200, "en"),
+      });
+
+      expect(output.runtimeStateSnapshot?.manifest.lastAppliedChapter).toBe(1);
+      expect(output.runtimeStateSnapshot?.chapterSummaries.rows).toHaveLength(1);
+      expect(output.runtimeStateSnapshot?.chapterSummaries.rows[0]?.title).toBe("New Opening");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("returns the arbiter-resolved delta instead of raw new-hook candidates", async () => {
     const root = await mkdtemp(join(tmpdir(), "inkos-writer-arbiter-test-"));
     const bookDir = join(root, "book");

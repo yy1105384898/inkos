@@ -2,7 +2,7 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
-import { fetchJson } from "../hooks/use-api";
+import { getBrowserServiceSelection } from "../lib/browser-service-config";
 import { chatSelectors, useChatStore } from "../store/chat";
 import { useServiceStore } from "../store/service";
 import {
@@ -59,11 +59,6 @@ export interface ChatPageProps {
   readonly sse: { messages: ReadonlyArray<SSEMessage>; connected: boolean };
 }
 
-interface ServiceConfigPayload {
-  readonly service?: string | null;
-  readonly defaultModel?: string | null;
-}
-
 // -- Component --
 
 export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-create", nav, theme, t, sse: _sse }: ChatPageProps) {
@@ -101,60 +96,42 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   // -- Model picker: read raw state, derive with useMemo (stable refs) --
   const services = useServiceStore((s) => s.services);
   const servicesLoading = useServiceStore((s) => s.servicesLoading);
-  const bankModelsLoading = useServiceStore((s) => s.bankModelsLoading);
-  const customModelsLoading = useServiceStore((s) => s.customModelsLoading);
+  const liveModelsLoading = useServiceStore((s) => s.liveModelsLoading);
   const modelsByService = useServiceStore((s) => s.modelsByService);
   const fetchServices = useServiceStore((s) => s.fetchServices);
-  const fetchBankModels = useServiceStore((s) => s.fetchBankModels);
-  const fetchCustomModels = useServiceStore((s) => s.fetchCustomModels);
+  const fetchLiveModels = useServiceStore((s) => s.fetchLiveModels);
   const [configuredModelSelection, setConfiguredModelSelection] = useState<ChatPageModelPreference | null>(null);
   const [serviceConfigLoaded, setServiceConfigLoaded] = useState(false);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
+  const connectedServices = useMemo(
+    () => services.filter((s) => s.connected),
+    [services],
+  );
   useEffect(() => {
-    void fetchBankModels();
-    void fetchCustomModels();
-  }, [fetchBankModels, fetchCustomModels]);
+    for (const svc of connectedServices) {
+      void fetchLiveModels(svc.service);
+    }
+  }, [connectedServices, fetchLiveModels]);
   useEffect(() => {
-    let cancelled = false;
-
-    void fetchJson<ServiceConfigPayload>("/services/config")
-      .then((payload) => {
-        if (cancelled) return;
-        setConfiguredModelSelection({
-          service: payload.service ?? null,
-          model: payload.defaultModel ?? null,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setConfiguredModelSelection(null);
-      })
-      .finally(() => {
-        if (!cancelled) setServiceConfigLoaded(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    const selected = getBrowserServiceSelection();
+    setConfiguredModelSelection(selected);
+    setServiceConfigLoaded(true);
   }, []);
 
   const modelPickerStatus = useMemo(() => {
     if (servicesLoading || services.length === 0) return "loading" as const;
-    const connected = services.filter((s) => s.connected);
-    if (connected.length === 0) return "no-models" as const;
-    if (bankModelsLoading) return "loading" as const;
-    if (connected.some((s) => (modelsByService[s.service]?.length ?? 0) > 0)) return "ready" as const;
-    const hasConnectedBank = connected.some((s) => !s.service.startsWith("custom"));
-    const hasConnectedCustom = connected.some((s) => s.service.startsWith("custom"));
-    if (!hasConnectedBank && hasConnectedCustom && customModelsLoading) return "loading" as const;
+    if (connectedServices.length === 0) return "no-models" as const;
+    if (connectedServices.some((s) => (modelsByService[s.service]?.length ?? 0) > 0)) return "ready" as const;
+    if (connectedServices.some((s) => liveModelsLoading[s.service])) return "loading" as const;
     return "no-models" as const;
-  }, [services, servicesLoading, bankModelsLoading, customModelsLoading, modelsByService]);
+  }, [connectedServices, liveModelsLoading, modelsByService, services.length, servicesLoading]);
 
   const groupedModels = useMemo(() => {
-    return services
-      .filter((s) => s.connected && (modelsByService[s.service]?.length ?? 0) > 0)
+    return connectedServices
+      .filter((s) => (modelsByService[s.service]?.length ?? 0) > 0)
       .map((s) => ({ service: s.service, label: s.label, models: modelsByService[s.service]! }));
-  }, [services, modelsByService]);
+  }, [connectedServices, modelsByService]);
 
   const selectedModelLabel = useMemo(() => {
     if (!selectedModel) return "选择模型";

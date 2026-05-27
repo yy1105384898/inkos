@@ -1,9 +1,17 @@
 <p align="center">
-  <img src="assets/logo.svg" width="120" height="120" alt="InkOS Logo">
-  <img src="assets/inkos-text.svg" width="240" height="65" alt="InkOS">
+  <img src="assets/logo.svg" width="120" height="120" alt="YANGYANG 小说 Agent Logo">
+  <img src="assets/inkos-text.svg" width="240" height="65" alt="YANGYANG 小说 Agent">
 </p>
 
-<h1 align="center">Autonomous Novel Writing AI Agent<br><sub>自动化小说写作 AI Agent</sub></h1>
+<h1 align="center">YANGYANG 小说 Agent<br><sub>云端自动化小说写作工作台</sub></h1>
+
+<p align="center">
+  <strong>二次开发声明：</strong>本项目基于 <a href="https://github.com/yy1105384898/inkos">yy1105384898/inkos</a> 二次开发，保留 AGPL-3.0-only 许可证约束，项目定位为 YANGYANG 小说 Agent 云端写作工作台。
+</p>
+
+<p align="center">
+  在线地址：<a href="https://yybooks.yangyangnj.top">https://yybooks.yangyangnj.top</a>
+</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@actalk/inkos"><img src="https://img.shields.io/npm/v/@actalk/inkos.svg?color=cb3837&logo=npm" alt="npm version"></a>
@@ -19,11 +27,11 @@
 
 ---
 
-AI Agent 自主写小说——写、审、改，全程接管。覆盖玄幻、仙侠、都市、科幻等多种风格，支持续写、番外、同人、仿写等创作形式。人工审核门控确保你始终掌控全局。已发布为 [OpenClaw](https://clawhub.ai/narcooo/inkos) skill。
+YANGYANG 小说 Agent 是基于 InkOS 二次开发的中文小说创作 Agent，云服务器统一保存书籍、章节、聊天记录和封面成果；模型 API 地址、文本 Key、生图 Key 默认只保存在当前浏览器。它可以自主写小说——写、审、改，全程接管。覆盖玄幻、仙侠、都市、科幻等多种风格，支持续写、番外、同人、仿写等创作形式。人工审核门控确保你始终掌控全局。
 
 
 
-**v1.4.0 短篇写作与 Studio Chat 协作更新** — Studio Chat 和 CLI 现在可以生成独立短篇、简介卖点和封面提示词 / 封面图；普通聊天支持持久化 session，生成物可直接预览和编辑；Studio 模型配置内置 [kkaiapi](https://kkaiapi.com/) ，方便接入全球主流模型聚合服务。
+**v1.4.0 短篇写作与 Studio Chat 协作更新** — Studio Chat 和 CLI 现在可以生成独立短篇、简介卖点和封面提示词 / 封面图；普通聊天支持持久化 session，生成物可直接预览和编辑；Studio 模型配置内置 [yynewapi](https://yynewapi.yangyangnj.top/) ，方便接入全球主流模型聚合服务。
 
 **InkOS Studio 2.0 正式发布！** — 直接运行 `inkos` 启动本地 Web 工作台。书籍管理、章节审阅编辑、实时写作进度、市场雷达、数据分析、AI 检测、文风分析、题材管理、守护进程控制、真相文件编辑——CLI 能做的，Studio 全部可视化。
 

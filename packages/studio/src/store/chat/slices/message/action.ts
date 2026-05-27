@@ -7,6 +7,7 @@ import type {
   SessionSummary,
 } from "../../types";
 import { fetchJson } from "../../../../hooks/use-api";
+import { getBrowserLlmOverride, setBrowserServiceSelection } from "../../../../lib/browser-service-config";
 import { attachSessionStreamListeners } from "./stream-events";
 import {
   bookKey,
@@ -95,7 +96,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       }),
     })),
 
-  setSelectedModel: (model, service) => set({ selectedModel: model, selectedService: service }),
+  setSelectedModel: (model, service) => {
+    setBrowserServiceSelection({ model, service });
+    set({ selectedModel: model, selectedService: service });
+  },
 
   loadSessionList: async (bookId) => {
     const query = bookId === null ? "null" : encodeURIComponent(bookId);
@@ -339,8 +343,11 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       sessions: updateSession(state.sessions, sessionId, () => ({ stream: streamEs })),
     }));
     attachSessionStreamListeners({ sessionId, streamTs, streamEs, set, get });
+    let keepStreamOpen = false;
 
     try {
+      const selectedModel = get().selectedModel ?? undefined;
+      const selectedService = get().selectedService ?? undefined;
       const data = await fetchJson<AgentResponse>("/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -348,11 +355,16 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
           instruction,
           activeBookId,
           sessionId,
-          model: get().selectedModel ?? undefined,
-          service: get().selectedService ?? undefined,
+          model: selectedModel,
+          service: selectedService,
+          llmOverride: getBrowserLlmOverride(selectedService, selectedModel),
         }),
       });
 
+      if (data.background) {
+        keepStreamOpen = true;
+        return;
+      }
       streamEs.close();
 
       const finalContent = data.details?.draftRaw || data.response || "";
@@ -406,6 +418,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         get().addErrorMessage(sessionId, errorMessage);
       }
     } finally {
+      if (keepStreamOpen) return;
       set((state) => ({
         sessions: updateSession(state.sessions, sessionId, (runtime) => ({
           isStreaming: false,

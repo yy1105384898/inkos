@@ -32,6 +32,25 @@ export function attachSessionStreamListeners({
   set,
   get,
 }: AttachSessionStreamListenersInput): void {
+  const finishBackgroundStream = (event: MessageEvent) => {
+    try {
+      const data = event.data ? JSON.parse(event.data) : null;
+      if (!sessionMatchesEvent(sessionId, data)) return;
+      streamEs.close();
+      set((state) => ({
+        sessions: updateSession(state.sessions, sessionId, (runtime) => ({
+          isStreaming: false,
+          stream: runtime.stream === streamEs ? null : runtime.stream,
+        })),
+      }));
+    } catch {
+      // ignore
+    }
+  };
+
+  streamEs.addEventListener("agent:complete", finishBackgroundStream);
+  streamEs.addEventListener("agent:error", finishBackgroundStream);
+
   streamEs.addEventListener("thinking:start", (event: MessageEvent) => {
     try {
       const data = event.data ? JSON.parse(event.data) : null;

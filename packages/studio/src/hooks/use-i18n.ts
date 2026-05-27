@@ -170,6 +170,8 @@ const strings = {
   "doctor.llmApi": { zh: "LLM API 连接", en: "LLM API connectivity" },
   "doctor.connected": { zh: "已连接", en: "Connected" },
   "doctor.failed": { zh: "失败", en: "Failed" },
+  "doctor.detected": { zh: "已检测", en: "Detected" },
+  "doctor.optional": { zh: "可选", en: "Optional" },
   "doctor.allPassed": { zh: "所有检查通过 — 环境健康", en: "All checks passed — environment is healthy" },
   "doctor.someFailed": { zh: "部分检查失败 — 请查看配置", en: "Some checks failed — review configuration" },
 

@@ -1,23 +1,23 @@
 /**
- * kkaiapi
+ * yynewapi
  *
- * - 官网：https://kkaiapi.com/
- * - API 文档：https://kkaiapi.com/docs
- * - 模型列表：https://kkaiapi.com/models
- * - 价格页：https://kkaiapi.com/pricing
+ * - 官网：https://yynewapi.yangyangnj.top/
+ * - API 文档：https://yynewapi.yangyangnj.top/docs
+ * - 模型列表：https://yynewapi.yangyangnj.top/models
+ * - 价格页：https://yynewapi.yangyangnj.top/pricing
  *
  * OpenAI-compatible 聚合入口。站点文档标注统一 /v1 入口，chat、stream、
  * tools 和 image generation 均按 OpenAI 兼容接口调用。
  */
 import type { InkosEndpoint } from "../types.js";
 
-export const KKAIAPI: InkosEndpoint = {
-  id: "kkaiapi",
-  label: "kkaiapi",
+export const YYNEWAPI: InkosEndpoint = {
+  id: "yynewapi",
+  label: "yynewapi",
   group: "aggregator",
   api: "openai-completions",
-  baseUrl: "https://api.kkaiapi.com/v1",
-  modelsBaseUrl: "https://api.kkaiapi.com/v1",
+  baseUrl: "https://yynewapi.yangyangnj.top/v1",
+  modelsBaseUrl: "https://yynewapi.yangyangnj.top/v1",
   checkModel: "deepseek-v4-flash",
   temperatureRange: [0, 2],
   defaultTemperature: 0.9,
@@ -48,7 +48,7 @@ export const KKAIAPI: InkosEndpoint = {
     { id: "mimo-v2.5-pro", maxOutput: 32768, contextWindowTokens: 128000 },
     { id: "mimo-v2.5", maxOutput: 32768, contextWindowTokens: 128000 },
     { id: "mimo-v2-pro", maxOutput: 32768, contextWindowTokens: 128000 },
-    // Hide until kkaiapi exposes a verified MiniMax chat route/model id.
+    // Hide until yynewapi exposes a verified MiniMax chat route/model id.
     { id: "MiniMax-M2.7", maxOutput: 64000, contextWindowTokens: 1_000_000, enabled: false, status: "disabled" },
     { id: "gpt-image-2-pro", maxOutput: 1, contextWindowTokens: 1, enabled: false, status: "nonText", capabilities: { text: false, imageOutput: true } },
     { id: "gpt-image-2", maxOutput: 1, contextWindowTokens: 1, enabled: false, status: "nonText", capabilities: { text: false, imageOutput: true } },

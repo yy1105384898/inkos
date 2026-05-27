@@ -23,12 +23,12 @@ describe("localizeKnownRuntimeMessage", () => {
       "Studio LLM API key not set. Open Studio services and save an API key for the selected service.",
     );
     expect(studioMessage).toContain("Studio 模型 API Key 未设置");
-    expect(studioMessage).not.toMatch(/kkaiapi/i);
+    expect(studioMessage).not.toMatch(/yynewapi/i);
 
     const cliMessage = localizeKnownRuntimeMessage(
       "INKOS_LLM_API_KEY not set. Run 'inkos config set-global' or add it to project .env file.",
     );
     expect(cliMessage).toContain("INKOS_LLM_API_KEY 未设置");
-    expect(cliMessage).not.toMatch(/kkaiapi/i);
+    expect(cliMessage).not.toMatch(/yynewapi/i);
   });
 });

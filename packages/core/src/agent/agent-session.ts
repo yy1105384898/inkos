@@ -15,6 +15,7 @@ import {
   createWriteTruthFileTool,
   createShortFictionRunTool,
   createGenerateCoverTool,
+  type CoverGenerationDefaults,
 } from "./agent-tools.js";
 import { createBookContextTransform } from "./context-transform.js";
 import {
@@ -52,6 +53,8 @@ export interface AgentSessionConfig {
   allowSystemFileRead?: boolean;
   /** Optional listener for streaming events (for SSE forwarding). */
   onEvent?: (event: AgentEvent) => void;
+  /** Request-scoped cover generation defaults, e.g. browser-local image key. */
+  coverGeneration?: CoverGenerationDefaults;
 }
 
 export interface AgentSessionResult {
@@ -76,6 +79,7 @@ interface CachedAgent {
   modelIdentity: string;
   apiKey: string | undefined;
   allowSystemFileRead: boolean;
+  coverGenerationIdentity: string;
   lastCommittedSeq: number;
   lastActive: number;
 }
@@ -470,10 +474,11 @@ function createAgentToolsForMode(params: {
   readonly bookId: string | null;
   readonly projectRoot: string;
   readonly allowSystemFileRead: boolean;
+  readonly coverGeneration?: CoverGenerationDefaults;
 }) {
   const subAgentTool = createSubAgentTool(params.pipeline, params.bookId, params.projectRoot);
-  const shortFictionTool = createShortFictionRunTool(params.pipeline, params.projectRoot);
-  const generateCoverTool = createGenerateCoverTool(params.projectRoot);
+  const shortFictionTool = createShortFictionRunTool(params.pipeline, params.projectRoot, params.coverGeneration);
+  const generateCoverTool = createGenerateCoverTool(params.projectRoot, params.coverGeneration);
   if (!params.bookId) {
     return [subAgentTool, shortFictionTool, generateCoverTool];
   }
@@ -523,6 +528,7 @@ async function runAgentSessionUnlocked(
   const model = resolveModel(config.model);
   const requestedModelIdentity = agentModelIdentity(model);
   const allowSystemFileRead = config.allowSystemFileRead ?? envFlagEnabled(process.env.INKOS_AGENT_ALLOW_SYSTEM_READ, false);
+  const coverGenerationIdentity = JSON.stringify(config.coverGeneration ?? {});
   const cacheKey = agentCacheKey(projectRoot, sessionId);
 
   // ----- Resolve or create Agent -----
@@ -541,6 +547,7 @@ async function runAgentSessionUnlocked(
     const languageChanged = cached.language !== language;
     const apiKeyChanged = cached.apiKey !== config.apiKey;
     const readPermissionChanged = cached.allowSystemFileRead !== allowSystemFileRead;
+    const coverGenerationChanged = cached.coverGenerationIdentity !== coverGenerationIdentity;
     const transcriptChanged = cached.lastCommittedSeq !== currentCommittedSeq;
 
     if (
@@ -550,6 +557,7 @@ async function runAgentSessionUnlocked(
       languageChanged ||
       apiKeyChanged ||
       readPermissionChanged ||
+      coverGenerationChanged ||
       transcriptChanged
     ) {
       agentCache.delete(cacheKey);
@@ -571,7 +579,13 @@ async function runAgentSessionUnlocked(
       initialState: {
         model,
         systemPrompt: buildAgentSystemPrompt(bookId, language),
-        tools: createAgentToolsForMode({ pipeline, bookId, projectRoot, allowSystemFileRead }),
+        tools: createAgentToolsForMode({
+          pipeline,
+          bookId,
+          projectRoot,
+          allowSystemFileRead,
+          coverGeneration: config.coverGeneration,
+        }),
         messages: initialAgentMessages,
       },
       transformContext: createBookContextTransform(bookId, projectRoot),
@@ -592,6 +606,7 @@ async function runAgentSessionUnlocked(
       modelIdentity: requestedModelIdentity,
       apiKey: config.apiKey,
       allowSystemFileRead,
+      coverGenerationIdentity,
       lastCommittedSeq: currentCommittedSeq ?? await latestCommittedSeq(projectRoot, sessionId),
       lastActive: Date.now(),
     };

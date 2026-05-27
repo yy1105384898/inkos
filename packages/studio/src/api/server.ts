@@ -101,7 +101,7 @@ function compareServiceListItems(
   left: { readonly service: string },
   right: { readonly service: string },
 ): number {
-  const priority = ["kkaiapi", "openrouter", "newapi", "siliconcloud"];
+  const priority = ["yynewapi", "openrouter", "newapi", "siliconcloud"];
   const leftPriority = priority.indexOf(left.service);
   const rightPriority = priority.indexOf(right.service);
   if (leftPriority !== -1 || rightPriority !== -1) {
@@ -540,6 +540,115 @@ interface ServiceProbeResult {
   baseUrl?: string;
   modelsSource?: "api" | "fallback";
   error?: string;
+}
+
+interface StudioBrowserLlmOverride {
+  readonly scope: "browser";
+  readonly service: string;
+  readonly model: string;
+  readonly apiKey: string;
+  readonly baseUrl?: string;
+  readonly apiFormat?: "chat" | "responses";
+  readonly stream?: boolean;
+  readonly temperature?: number;
+}
+
+interface StudioBrowserCoverOverride {
+  readonly scope: "browser";
+  readonly service: string;
+  readonly model: string;
+  readonly apiKey: string;
+}
+
+function normalizeBrowserLlmOverride(value: unknown): StudioBrowserLlmOverride | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (raw.scope !== "browser") return undefined;
+  const service = typeof raw.service === "string" ? raw.service.trim() : "";
+  const model = typeof raw.model === "string" ? raw.model.trim() : "";
+  const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
+  const baseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl.trim() : "";
+  const apiFormat = raw.apiFormat === "chat" || raw.apiFormat === "responses" ? raw.apiFormat : undefined;
+  const stream = typeof raw.stream === "boolean" ? raw.stream : undefined;
+  const temperature = typeof raw.temperature === "number" && Number.isFinite(raw.temperature)
+    ? raw.temperature
+    : undefined;
+  if (!service || !model || !isTextChatModelId(model)) {
+    throw new ApiError(400, "INVALID_BROWSER_LLM", "浏览器模型配置无效。");
+  }
+  if (apiKey && !isHeaderSafeApiKey(apiKey)) {
+    throw new ApiError(400, "INVALID_API_KEY", "API Key 包含不能放入 HTTP Authorization header 的字符。");
+  }
+  if (isCustomServiceId(service) && !baseUrl) {
+    throw new ApiError(400, "INVALID_BROWSER_LLM", "自定义服务缺少 Base URL。");
+  }
+  return {
+    scope: "browser",
+    service,
+    model,
+    apiKey,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiFormat ? { apiFormat } : {}),
+    ...(stream !== undefined ? { stream } : {}),
+    ...(temperature !== undefined ? { temperature } : {}),
+  };
+}
+
+function buildBrowserLlmConfig(
+  config: ProjectConfig,
+  override?: StudioBrowserLlmOverride,
+): ProjectConfig["llm"] {
+  if (!override) return config.llm;
+  const baseService = isCustomServiceId(override.service) ? "custom" : override.service;
+  const preset = resolveServicePreset(baseService);
+  return {
+    ...config.llm,
+    service: baseService,
+    provider: resolveServiceProviderFamily(baseService) ?? config.llm.provider ?? "openai",
+    model: override.model,
+    apiKey: override.apiKey,
+    baseUrl: override.baseUrl ?? preset?.baseUrl ?? config.llm.baseUrl ?? "",
+    ...(override.apiFormat ? { apiFormat: override.apiFormat } : {}),
+    ...(override.stream !== undefined ? { stream: override.stream } : {}),
+    ...(override.temperature !== undefined ? { temperature: override.temperature } : {}),
+  } as ProjectConfig["llm"];
+}
+
+function normalizeBrowserCoverOverride(value: unknown): StudioBrowserCoverOverride | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  if (raw.scope !== "browser") return undefined;
+  const service = typeof raw.service === "string" ? raw.service.trim() : "";
+  const model = typeof raw.model === "string" ? raw.model.trim() : "";
+  const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
+  if (!service || !model) {
+    throw new ApiError(400, "INVALID_BROWSER_COVER", "浏览器生图配置无效。");
+  }
+  if (apiKey && !isHeaderSafeApiKey(apiKey)) {
+    throw new ApiError(400, "INVALID_API_KEY", "生图 API Key 包含不能放入 HTTP Authorization header 的字符。");
+  }
+  return { scope: "browser", service, model, apiKey };
+}
+
+function buildBrowserCoverGeneration(override?: StudioBrowserCoverOverride): {
+  readonly coverBaseUrl?: string;
+  readonly coverModel?: string;
+  readonly coverApiKey?: string;
+} | undefined {
+  if (!override) return undefined;
+  const preset = resolveCoverProviderPreset(override.service);
+  if (!preset) {
+    throw new ApiError(400, "INVALID_BROWSER_COVER", `Unsupported cover service: ${override.service}`);
+  }
+  return {
+    coverBaseUrl: preset.baseUrl,
+    coverModel: override.model,
+    coverApiKey: override.apiKey,
+  };
+}
+
+async function readJsonBody<T extends Record<string, unknown>>(c: { req: { json: <R>() => Promise<R> } }): Promise<T> {
+  return await c.req.json<T>().catch(() => ({} as T));
 }
 
 function broadcast(event: string, data: unknown): void {
@@ -1275,9 +1384,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     overrides?: Partial<Pick<PipelineConfig, "externalContext" | "client" | "model">> & {
       readonly currentConfig?: ProjectConfig;
       readonly sessionIdForSSE?: string;
+      readonly llmOverride?: StudioBrowserLlmOverride;
     },
   ): Promise<PipelineConfig> {
     const currentConfig = overrides?.currentConfig ?? await loadCurrentProjectConfig();
+    const effectiveLlmConfig = buildBrowserLlmConfig(currentConfig, overrides?.llmOverride);
     const scopedSseSink: LogSink = overrides?.sessionIdForSSE
       ? {
           write(entry) {
@@ -1292,10 +1403,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       : sseSink;
     const logger = createLogger({ tag: "studio", sinks: [scopedSseSink, consoleSink] });
     return {
-      client: overrides?.client ?? createLLMClient(currentConfig.llm),
-      model: overrides?.model ?? currentConfig.llm.model,
+      client: overrides?.client ?? createLLMClient(effectiveLlmConfig),
+      model: overrides?.model ?? effectiveLlmConfig.model,
       projectRoot: root,
-      defaultLLMConfig: currentConfig.llm,
+      defaultLLMConfig: effectiveLlmConfig,
       foundationReviewRetries: currentConfig.foundation?.reviewRetries ?? 2,
       writingReviewRetries: currentConfig.writing?.reviewRetries ?? 1,
       modelOverrides: currentConfig.modelOverrides,
@@ -1363,7 +1474,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       chapterWordCount?: number;
       targetChapters?: number;
       blurb?: string;
+      llmOverride?: unknown;
     }>();
+    const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
     const now = new Date().toISOString();
     const bookConfig = buildStudioBookConfig(body, now);
@@ -1381,7 +1494,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     broadcast("book:creating", { bookId, title: body.title });
     bookCreateStatus.set(bookId, { status: "creating" });
 
-    const pipeline = new PipelineRunner(await buildPipelineConfig());
+    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
     const tools = createInteractionToolsFromDeps(pipeline, state);
     processProjectInteractionRequest({
       projectRoot: root,
@@ -1589,12 +1702,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.post("/api/v1/books/:id/write-next", async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json<{ wordCount?: number }>().catch(() => ({ wordCount: undefined }));
+    const body = await c.req
+      .json<{ wordCount?: number; llmOverride?: unknown }>()
+      .catch(() => ({ wordCount: undefined }) as { wordCount?: number; llmOverride?: unknown });
+    const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
     broadcast("write:start", { bookId: id });
 
     // Fire and forget — progress/completion/errors pushed via SSE
-    const pipeline = new PipelineRunner(await buildPipelineConfig());
+    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
     pipeline.writeNextChapter(id, body.wordCount).then(
       (result) => {
         broadcast("write:complete", { bookId: id, chapterNumber: result.chapterNumber, status: result.status, title: result.title, wordCount: result.wordCount });
@@ -1609,11 +1725,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.post("/api/v1/books/:id/draft", async (c) => {
     const id = c.req.param("id");
-    const body = await c.req.json<{ wordCount?: number; context?: string }>().catch(() => ({ wordCount: undefined, context: undefined }));
+    const body = await c.req
+      .json<{ wordCount?: number; context?: string; llmOverride?: unknown }>()
+      .catch(() => ({ wordCount: undefined, context: undefined }) as {
+        wordCount?: number;
+        context?: string;
+        llmOverride?: unknown;
+      });
+    const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
     broadcast("draft:start", { bookId: id });
 
-    const pipeline = new PipelineRunner(await buildPipelineConfig());
+    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
     pipeline.writeDraft(id, body.context, body.wordCount).then(
       (result) => {
         broadcast("draft:complete", { bookId: id, chapterNumber: result.chapterNumber, title: result.title, wordCount: result.wordCount });
@@ -1861,6 +1984,91 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     await saveSecrets(root, secrets);
     modelListCache.clear();
     return c.json({ ok: true, service });
+  });
+
+  app.post("/api/v1/browser-services/test", async (c) => {
+    const { service, apiKey, baseUrl, apiFormat, stream } = await c.req.json<{
+      service?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      apiFormat?: "chat" | "responses";
+      stream?: boolean;
+    }>();
+    const serviceId = service?.trim() ?? "";
+    if (!serviceId) return c.json({ ok: false, error: "服务商不能为空" }, 400);
+    const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, serviceId, baseUrl);
+    if (!resolvedBaseUrl) return c.json({ ok: false, error: `未知服务商: ${serviceId}` }, 400);
+
+    const baseService = isCustomServiceId(serviceId) ? "custom" : serviceId;
+    const trimmedKey = apiKey?.trim() ?? "";
+    const apiKeyOptional = isApiKeyOptionalForEndpoint({
+      provider: resolveServiceProviderFamily(baseService) ?? "openai",
+      baseUrl: resolvedBaseUrl,
+    });
+    if (!trimmedKey && !apiKeyOptional) {
+      return c.json({ ok: false, error: "API Key 不能为空" }, 400);
+    }
+    if (trimmedKey && !isHeaderSafeApiKey(trimmedKey)) {
+      return c.json({ ok: false, error: "API Key 包含不能放入 HTTP Authorization header 的字符。" }, 400);
+    }
+
+    const rawConfig = await loadRawConfig(root).catch(() => ({} as Record<string, unknown>));
+    const llm = (rawConfig.llm as Record<string, unknown> | undefined) ?? {};
+    const probe = await probeServiceCapabilities({
+      root,
+      service: serviceId,
+      apiKey: trimmedKey,
+      baseUrl: resolvedBaseUrl,
+      preferredApiFormat: apiFormat,
+      preferredStream: stream,
+      proxyUrl: typeof llm.proxyUrl === "string" ? llm.proxyUrl : undefined,
+    });
+    if (!probe.ok) {
+      return c.json({ ok: false, error: probe.error ?? "连接失败" }, 400);
+    }
+    return c.json({
+      ok: true,
+      modelCount: probe.models.length,
+      models: probe.models,
+      selectedModel: probe.selectedModel,
+      detected: {
+        apiFormat: probe.apiFormat,
+        stream: probe.stream,
+        baseUrl: probe.baseUrl,
+        modelsSource: probe.modelsSource,
+      },
+    });
+  });
+
+  app.post("/api/v1/browser-services/models", async (c) => {
+    const { service, apiKey, baseUrl } = await c.req.json<{
+      service?: string;
+      apiKey?: string;
+      baseUrl?: string;
+    }>();
+    const serviceId = service?.trim() ?? "";
+    if (!serviceId) return c.json({ models: [] });
+    const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, serviceId, baseUrl);
+    const baseService = isCustomServiceId(serviceId) ? "custom" : serviceId;
+    const trimmedKey = apiKey?.trim() ?? "";
+    const apiKeyOptional = isApiKeyOptionalForEndpoint({
+      provider: resolveServiceProviderFamily(baseService) ?? "openai",
+      baseUrl: resolvedBaseUrl,
+    });
+    if (!trimmedKey && !apiKeyOptional) return c.json({ models: [] });
+
+    const enriched = await listModelsForService(
+      baseService,
+      trimmedKey,
+      isCustomServiceId(serviceId) ? resolvedBaseUrl ?? undefined : undefined,
+    );
+    const models = filterTextChatModels(enriched).map((m) => ({
+      id: m.id,
+      name: m.name,
+      ...(m.maxOutput !== undefined ? { maxOutput: m.maxOutput } : {}),
+      ...(m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
+    }));
+    return c.json({ models });
   });
 
   app.post("/api/v1/services/:service/test", async (c) => {
@@ -2311,13 +2519,17 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   });
 
   app.post("/api/v1/agent", async (c) => {
-    const { instruction, activeBookId, sessionId: reqSessionId, model: reqModel, service: reqService } = await c.req.json<{
+    const { instruction, activeBookId, sessionId: reqSessionId, model: reqModel, service: reqService, llmOverride: rawLlmOverride, coverOverride: rawCoverOverride } = await c.req.json<{
       instruction: string;
       activeBookId?: string;
       sessionId?: string;
       model?: string;
       service?: string;
+      llmOverride?: unknown;
+      coverOverride?: unknown;
     }>();
+    const llmOverride = normalizeBrowserLlmOverride(rawLlmOverride);
+    const coverGeneration = buildBrowserCoverGeneration(normalizeBrowserCoverOverride(rawCoverOverride));
     const sessionId = reqSessionId;
     if (!instruction?.trim()) {
       return c.json({ error: "No instruction provided" }, 400);
@@ -2335,7 +2547,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     try {
       // Load config + create LLM client (pipeline created after model resolution)
       const config = await loadCurrentProjectConfig({ requireApiKey: false });
-      const client = createLLMClient(config.llm);
+      const effectiveLlmConfig = buildBrowserLlmConfig(config, llmOverride);
+      const client = createLLMClient(effectiveLlmConfig);
 
       const loadedBookSession = await loadBookSession(root, sessionId);
       if (!loadedBookSession) {
@@ -2416,7 +2629,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       let resolvedModel: ResolvedModel["model"] | undefined;
       let resolvedApiKey: string | undefined;
 
-      if (reqService && reqModel) {
+      if (llmOverride) {
+        resolvedModel = client._piModel
+          ? client._piModel
+          : {
+              provider: effectiveLlmConfig.provider ?? "openai",
+              modelId: effectiveLlmConfig.model,
+              baseUrl: effectiveLlmConfig.baseUrl,
+            } as any;
+        resolvedApiKey = llmOverride.apiKey;
+      }
+
+      if (!resolvedModel && reqService && reqModel) {
         // 1. Frontend explicitly selected a service+model — fail loudly if no key
         try {
           const configuredEntry = await resolveConfiguredServiceEntry(root, reqService);
@@ -2492,18 +2716,28 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         // 4. Legacy fallback: use createLLMClient
         resolvedModel = client._piModel
           ? client._piModel
-          : { provider: config.llm.provider ?? "anthropic", modelId: config.llm.model } as any;
+          : { provider: effectiveLlmConfig.provider ?? "anthropic", modelId: effectiveLlmConfig.model } as any;
         resolvedApiKey = client._apiKey;
       }
 
       const model = resolvedModel!;
       const agentApiKey = resolvedApiKey;
-      const configuredEntry = reqService ? await resolveConfiguredServiceEntry(root, reqService) : undefined;
+      const configuredEntry = llmOverride
+        ? {
+            service: isCustomServiceId(llmOverride.service) ? "custom" : llmOverride.service,
+            ...(llmOverride.baseUrl ? { baseUrl: llmOverride.baseUrl } : {}),
+            ...(llmOverride.apiFormat ? { apiFormat: llmOverride.apiFormat } : {}),
+            ...(llmOverride.stream !== undefined ? { stream: llmOverride.stream } : {}),
+          }
+        : reqService ? await resolveConfiguredServiceEntry(root, reqService) : undefined;
+      const activeModel = reqModel ?? llmOverride?.model ?? effectiveLlmConfig.model;
 
       // Create pipeline with resolved model (so sub_agent tools use the frontend-selected model)
       // Don't spread config.llm — its baseUrl/provider belong to the old service.
       // Let createLLMClient resolve baseUrl from the service preset.
-      const pipelineClient = (reqService && reqModel && resolvedModel)
+      const pipelineClient = llmOverride
+        ? client
+        : (reqService && reqModel && resolvedModel)
         ? createLLMClient({
             ...config.llm,
             service: configuredEntry?.service ?? reqService,
@@ -2516,14 +2750,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         : client;
       const pipeline = new PipelineRunner(await buildPipelineConfig({
         client: pipelineClient,
-        model: reqModel ?? config.llm.model,
+        model: activeModel,
         currentConfig: config,
         sessionIdForSSE: bookSession.sessionId,
+        llmOverride,
       }));
 
       if (agentBookId && isWriteNextInstruction(instruction)) {
         const toolCallId = `direct-writer-${Date.now().toString(36)}`;
         const toolArgs = { agent: "writer", bookId: agentBookId };
+        broadcast("write:start", { bookId: agentBookId, sessionId: streamSessionId });
         broadcast("tool:start", {
           sessionId: streamSessionId,
           id: toolCallId,
@@ -2532,8 +2768,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           stages: PIPELINE_STAGES.writer,
         });
 
-        try {
-          const writeResult = await pipeline.writeNextChapter(agentBookId);
+        pipeline.writeNextChapter(agentBookId).then(
+          async (writeResult) => {
           const responseText = [
             `已为 ${agentBookId} 完成第 ${writeResult.chapterNumber} 章`,
             writeResult.title ? `《${writeResult.title}》` : "",
@@ -2550,6 +2786,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
               status: writeResult.status,
             },
           };
+          broadcast("draft:delta", { sessionId: streamSessionId, text: responseText });
           broadcast("tool:end", {
             sessionId: streamSessionId,
             id: toolCallId,
@@ -2558,12 +2795,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             details: toolResult.details,
             isError: false,
           });
+          broadcast("write:complete", {
+            bookId: agentBookId,
+            sessionId: streamSessionId,
+            chapterNumber: writeResult.chapterNumber,
+            status: writeResult.status,
+            title: writeResult.title,
+            wordCount: writeResult.wordCount,
+          });
           await appendManualSessionMessages(root, bookSession.sessionId, [{
             role: "assistant",
             content: [{ type: "text", text: responseText }],
             api: "anthropic-messages",
-            provider: configuredEntry?.service ?? reqService ?? config.llm.provider,
-            model: reqModel ?? config.llm.model,
+            provider: configuredEntry?.service ?? reqService ?? effectiveLlmConfig.provider,
+            model: activeModel,
             usage: {
               input: 0,
               output: 0,
@@ -2577,14 +2822,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           }], instruction);
           await refreshBookSessionFromTranscript();
           broadcast("agent:complete", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId });
-          return c.json({
-            response: responseText,
-            session: {
-              sessionId: bookSession.sessionId,
-              activeBookId: agentBookId,
-            },
-          });
-        } catch (error) {
+          },
+          (error) => {
           const message = error instanceof Error ? error.message : String(error);
           const toolResult = { content: [{ type: "text", text: message }] };
           broadcast("tool:end", {
@@ -2594,12 +2833,17 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             result: toolResult,
             isError: true,
           });
+          broadcast("write:error", { bookId: agentBookId, sessionId: streamSessionId, error: message });
           broadcast("agent:error", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId, error: message });
-          return c.json({
-            error: { code: "AGENT_ACTION_FAILED", message },
-            response: message,
-          }, 502);
-        }
+          },
+        );
+        return c.json({
+          background: true,
+          session: {
+            sessionId: bookSession.sessionId,
+            activeBookId: agentBookId,
+          },
+        });
       }
 
       // Run pi-agent session
@@ -2613,6 +2857,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           bookId: agentBookId,
           sessionId: bookSession.sessionId,
           language: config.language ?? "zh",
+          coverGeneration,
           onEvent: (event) => {
             if (event.type === "message_update") {
               const ame = event.assistantMessageEvent;
@@ -2765,8 +3010,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         try {
           const fallbackClient = createLLMClient({
             ...config.llm,
-            service: configuredEntry?.service ?? reqService ?? config.llm.service,
-            model: reqModel ?? config.llm.model,
+            service: configuredEntry?.service ?? reqService ?? effectiveLlmConfig.service,
+            model: activeModel,
             apiKey: agentApiKey ?? config.llm.apiKey,
             baseUrl: configuredEntry?.baseUrl ?? "",
             ...(configuredEntry?.apiFormat ? { apiFormat: configuredEntry.apiFormat } : {}),
@@ -2774,7 +3019,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           } as ProjectConfig["llm"]);
           const fallback = await chatCompletion(
             fallbackClient,
-            reqModel ?? config.llm.model,
+            activeModel,
             [
               { role: "system", content: buildAgentSystemPrompt(agentBookId, config.language ?? "zh") },
               { role: "user", content: instruction },
@@ -2798,8 +3043,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
               role: "assistant",
               content: [{ type: "text", text: fallback.content }],
               api: "anthropic-messages",
-              provider: configuredEntry?.service ?? reqService ?? config.llm.provider,
-              model: reqModel ?? config.llm.model,
+              provider: configuredEntry?.service ?? reqService ?? effectiveLlmConfig.provider,
+              model: activeModel,
               usage: {
                 input: 0,
                 output: 0,
@@ -2828,8 +3073,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         try {
           const probeClient = createLLMClient({
             ...config.llm,
-            service: configuredEntry?.service ?? reqService ?? config.llm.service,
-            model: reqModel ?? config.llm.model,
+            service: configuredEntry?.service ?? reqService ?? effectiveLlmConfig.service,
+            model: activeModel,
             apiKey: agentApiKey ?? config.llm.apiKey,
             baseUrl: configuredEntry?.baseUrl ?? "",
             ...(configuredEntry?.apiFormat ? { apiFormat: configuredEntry.apiFormat } : {}),
@@ -2837,7 +3082,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           } as ProjectConfig["llm"]);
           await chatCompletion(
             probeClient,
-            reqModel ?? config.llm.model,
+            activeModel,
             [{ role: "user", content: "ping" }],
             { maxTokens: 5 },
           );
@@ -2922,6 +3167,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const id = c.req.param("id");
     const chapterNum = parseInt(c.req.param("chapter"), 10);
     const bookDir = state.bookDir(id);
+    const body = await c.req
+      .json<{ llmOverride?: unknown }>()
+      .catch(() => ({}) as { llmOverride?: unknown });
+    const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
     broadcast("audit:start", { bookId: id, chapter: chapterNum });
     try {
@@ -2934,10 +3183,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
       const content = await readFile(join(chaptersDir, match), "utf-8");
       const currentConfig = await loadCurrentProjectConfig();
+      const effectiveLlmConfig = buildBrowserLlmConfig(currentConfig, llmOverride);
       const { ContinuityAuditor } = await import("@actalk/inkos-core");
       const auditor = new ContinuityAuditor({
-        client: createLLMClient(currentConfig.llm),
-        model: currentConfig.llm.model,
+        client: createLLMClient(effectiveLlmConfig),
+        model: effectiveLlmConfig.model,
         projectRoot: root,
         bookId: id,
       });
@@ -2957,8 +3207,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const chapterNum = parseInt(c.req.param("chapter"), 10);
     const bookDir = state.bookDir(id);
     const body = await c.req
-      .json<{ mode?: string; brief?: string }>()
-      .catch(() => ({ mode: "spot-fix", brief: undefined }));
+      .json<{ mode?: string; brief?: string; llmOverride?: unknown }>()
+      .catch(() => ({ mode: "spot-fix", brief: undefined }) as {
+        mode?: string;
+        brief?: string;
+        llmOverride?: unknown;
+      });
+    const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
     broadcast("revise:start", { bookId: id, chapter: chapterNum });
     try {
@@ -2971,6 +3226,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
       const pipeline = new PipelineRunner(await buildPipelineConfig({
         externalContext: body.brief,
+        llmOverride,
       }));
       const normalizedMode = body.mode ?? "spot-fix";
       const result = await pipeline.reviseDraft(
@@ -3217,8 +3473,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const id = c.req.param("id");
     const chapterNum = parseInt(c.req.param("chapter"), 10);
     const body: { brief?: string } = await c.req
-      .json<{ brief?: string }>()
+      .json<{ brief?: string; llmOverride?: unknown }>()
       .catch(() => ({}));
+    const llmOverride = normalizeBrowserLlmOverride((body as { llmOverride?: unknown }).llmOverride);
 
     broadcast("rewrite:start", { bookId: id, chapter: chapterNum });
     try {
@@ -3226,6 +3483,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       const discarded = await state.rollbackToChapter(id, rollbackTarget);
       const pipeline = new PipelineRunner(await buildPipelineConfig({
         externalContext: body.brief,
+        llmOverride,
       }));
       pipeline.writeNextChapter(id).then(
         (result) => broadcast("rewrite:complete", { bookId: id, chapterNumber: result.chapterNumber, title: result.title, wordCount: result.wordCount }),
@@ -3242,12 +3500,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const id = c.req.param("id");
     const chapterNum = parseInt(c.req.param("chapter"), 10);
     const body: { brief?: string } = await c.req
-      .json<{ brief?: string }>()
+      .json<{ brief?: string; llmOverride?: unknown }>()
       .catch(() => ({}));
+    const llmOverride = normalizeBrowserLlmOverride((body as { llmOverride?: unknown }).llmOverride);
 
     try {
       const pipeline = new PipelineRunner(await buildPipelineConfig({
         externalContext: body.brief,
+        llmOverride,
       }));
       const result = await pipeline.resyncChapterArtifacts(id, chapterNum);
       return c.json(result);

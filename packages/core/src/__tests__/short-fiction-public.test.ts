@@ -141,13 +141,13 @@ describe("public short-fiction chain", () => {
         language: "zh",
         llm: {
           provider: "openai",
-          service: "kkaiapi",
+          service: "yynewapi",
           configSource: "studio",
-          baseUrl: "https://api.kkaiapi.com/v1",
+          baseUrl: "https://yynewapi.yangyangnj.top/v1",
           apiKey: "",
           model: "deepseek-v4-flash",
           cover: {
-            service: "kkaiapi",
+            service: "yynewapi",
             model: "gpt-image-2",
           },
         },
@@ -155,13 +155,13 @@ describe("public short-fiction chain", () => {
       }, null, 2), "utf-8");
       await saveSecrets(root, {
         services: {
-          "cover:kkaiapi": { apiKey: "sk-cover" },
+          "cover:yynewapi": { apiKey: "sk-cover" },
         },
       });
 
       await expect(resolveCoverGenerationRequest({ root })).resolves.toMatchObject({
         api: "images",
-        baseUrl: "https://api.kkaiapi.com/v1",
+        baseUrl: "https://yynewapi.yangyangnj.top/v1",
         model: "gpt-image-2",
         apiKey: "sk-cover",
       });
@@ -172,8 +172,8 @@ describe("public short-fiction chain", () => {
 
   it("extracts OpenAI-compatible image generation URLs and base64 payloads", () => {
     expect(extractImagesGenerationImage({
-      data: [{ url: "https://api.kkaiapi.com/files/img_abc123.png" }],
-    })).toEqual({ url: "https://api.kkaiapi.com/files/img_abc123.png" });
+      data: [{ url: "https://yynewapi.yangyangnj.top/files/img_abc123.png" }],
+    })).toEqual({ url: "https://yynewapi.yangyangnj.top/files/img_abc123.png" });
 
     expect(extractImagesGenerationImage({
       data: [{ b64_json: "ZmFrZQ==" }],

@@ -490,7 +490,7 @@ async function withTransientLLMRetry<T>(
 }
 
 function shouldUseNativeCustomTransport(client: LLMClient): boolean {
-  if (client.service === "kkaiapi" && client.provider === "openai") {
+  if (client.service === "yynewapi" && client.provider === "openai") {
     return true;
   }
   if (client.service === "custom") {

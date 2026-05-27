@@ -318,9 +318,18 @@ const ShortFictionRunParams = Type.Object({
 
 type ShortFictionRunParamsType = Static<typeof ShortFictionRunParams>;
 
+export interface CoverGenerationDefaults {
+  readonly coverBaseUrl?: string;
+  readonly coverEndpoint?: string;
+  readonly coverModel?: string;
+  readonly coverSize?: string;
+  readonly coverApiKey?: string;
+}
+
 export function createShortFictionRunTool(
   pipeline: PipelineRunner,
   projectRoot: string,
+  coverDefaults: CoverGenerationDefaults = {},
 ): AgentTool<typeof ShortFictionRunParams> {
   return {
     name: "short_fiction_run",
@@ -353,11 +362,12 @@ export function createShortFictionRunTool(
         chapterCount: params.chapters,
         charsPerChapter: params.chars,
         cover: params.cover,
-        coverBaseUrl: params.coverBaseUrl,
-        coverEndpoint: params.coverEndpoint,
-        coverModel: params.coverModel,
-        coverSize: params.coverSize,
+        coverBaseUrl: params.coverBaseUrl ?? coverDefaults.coverBaseUrl,
+        coverEndpoint: params.coverEndpoint ?? coverDefaults.coverEndpoint,
+        coverModel: params.coverModel ?? coverDefaults.coverModel,
+        coverSize: params.coverSize ?? coverDefaults.coverSize,
         coverApiKeyEnv: params.coverApiKeyEnv,
+        coverApiKey: coverDefaults.coverApiKey,
         onProgress: progress,
       });
 
@@ -436,6 +446,7 @@ type GenerateCoverParamsType = Static<typeof GenerateCoverParams>;
 
 export function createGenerateCoverTool(
   projectRoot: string,
+  coverDefaults: CoverGenerationDefaults = {},
 ): AgentTool<typeof GenerateCoverParams> {
   return {
     name: "generate_cover",
@@ -458,11 +469,12 @@ export function createGenerateCoverTool(
         sellingPoints: params.sellingPoints,
         coverPrompt: params.coverPrompt,
         outputDir: params.outputDir,
-        coverBaseUrl: params.coverBaseUrl,
-        coverEndpoint: params.coverEndpoint,
-        coverModel: params.coverModel,
-        coverSize: params.coverSize,
+        coverBaseUrl: params.coverBaseUrl ?? coverDefaults.coverBaseUrl,
+        coverEndpoint: params.coverEndpoint ?? coverDefaults.coverEndpoint,
+        coverModel: params.coverModel ?? coverDefaults.coverModel,
+        coverSize: params.coverSize ?? coverDefaults.coverSize,
         coverApiKeyEnv: params.coverApiKeyEnv,
+        coverApiKey: coverDefaults.coverApiKey,
       });
       return textResult(
         [
