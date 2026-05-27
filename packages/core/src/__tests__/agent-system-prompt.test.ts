@@ -69,6 +69,8 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).toContain("write_truth_file");
       expect(prompt).toContain("rename_entity");
       expect(prompt).toContain("update_chapter_title");
+      expect(prompt).toContain("页面显示标题");
+      expect(prompt).toContain("不要回答“我没有权限改页面/索引/index.json”");
       expect(prompt).toContain("patch_chapter_text");
       expect(prompt).toContain("short_fiction_run");
       expect(prompt).toContain("grep");

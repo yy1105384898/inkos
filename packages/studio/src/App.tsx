@@ -18,13 +18,16 @@ import { ImportManager } from "./pages/ImportManager";
 import { RadarView } from "./pages/RadarView";
 import { DoctorView } from "./pages/DoctorView";
 import { LanguageSelector } from "./pages/LanguageSelector";
+import { LoginPage } from "./pages/LoginPage";
+import { AdminPanel } from "./pages/AdminPanel";
 import { BookSidebar, BookSidebarToggle } from "./components/chat/BookSidebar";
 import { useSSE } from "./hooks/use-sse";
 import { useSessionEvents } from "./hooks/use-session-events";
 import { useTheme } from "./hooks/use-theme";
 import { useI18n } from "./hooks/use-i18n";
+import { useAuth } from "./hooks/use-auth";
 import { postApi, putApi, useApi } from "./hooks/use-api";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, LogOut } from "lucide-react";
 import { House } from "lucide-react";
 
 export type { HashRoute as Route } from "./hooks/use-hash-route";
@@ -39,11 +42,14 @@ export function isBookCreateChatRoute(route: HashRoute): boolean {
 }
 
 export function App() {
+  const auth = useAuth();
   const { route, setRoute } = useHashRoute();
   const sse = useSSE();
   const { theme, setTheme } = useTheme();
   const { t, lang: currentLang } = useI18n();
-  const { data: project, refetch: refetchProject } = useApi<{ language: string; languageExplicit: boolean }>("/project");
+  const { data: project, refetch: refetchProject } = useApi<{ language: string; languageExplicit: boolean }>(
+    auth.user ? "/project" : "",
+  );
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -54,13 +60,18 @@ export function App() {
   }, [isDark]);
 
   useEffect(() => {
+    if (!auth.user) {
+      setReady(false);
+      setShowLanguageSelector(false);
+      return;
+    }
     if (project) {
       if (!project.languageExplicit) {
         setShowLanguageSelector(true);
       }
       setReady(true);
     }
-  }, [project]);
+  }, [auth.user, project]);
 
   useSessionEvents(sse, route, setRoute);
 
@@ -83,6 +94,7 @@ export function App() {
     toImport: () => setRoute({ page: "import" }),
     toRadar: () => setRoute({ page: "radar" }),
     toDoctor: () => setRoute({ page: "doctor" }),
+    toAdmin: () => setRoute({ page: "admin" }),
   };
 
   const activeBookId = deriveActiveBookId(route);
@@ -92,6 +104,18 @@ export function App() {
       : route.page === "service-detail"
         ? "services"
         : route.page;
+
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!auth.user) {
+    return <LoginPage auth={auth} />;
+  }
 
   if (!ready) {
     return (
@@ -162,6 +186,26 @@ export function App() {
             >
               {isDark ? <Sun size={14} /> : <Moon size={14} />}
             </button>
+
+            <div className="flex items-center gap-2 pl-3 border-l border-border/40">
+              <span className="text-xs text-muted-foreground hidden sm:inline">{auth.user.username}</span>
+              {auth.user.role === "admin" && (
+                <button
+                  onClick={() => setRoute({ page: "admin" })}
+                  className="text-xs underline text-muted-foreground hover:text-foreground transition-colors"
+                  title="用户管理"
+                >
+                  管理
+                </button>
+              )}
+              <button
+                onClick={() => { void auth.logout(); }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="退出登录"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -271,6 +315,11 @@ export function App() {
           {route.page === "doctor" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <DoctorView nav={nav} theme={theme} t={t} />
+            </div>
+          )}
+          {route.page === "admin" && auth.user.role === "admin" && (
+            <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
+              <AdminPanel currentUser={auth.user} />
             </div>
           )}
         </main>

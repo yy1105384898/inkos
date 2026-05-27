@@ -620,9 +620,9 @@ export function createUpdateChapterTitleTool(
 ): AgentTool<typeof UpdateChapterTitleParams> {
   const state = new StateManager(projectRoot);
   return {
-    name: "update_chapter_title",
-    description:
-      "Update an existing chapter title. This safely syncs chapters/index.json, the chapter Markdown heading, and the chapter filename.",
+  name: "update_chapter_title",
+  description:
+      "Update an existing chapter title, sidebar/list chapter title, or table-of-contents title. This safely syncs chapters/index.json, the chapter Markdown heading, and the chapter filename.",
     label: "Update Chapter Title",
     parameters: UpdateChapterTitleParams,
     async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {

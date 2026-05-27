@@ -29,7 +29,8 @@ RUN corepack enable && corepack prepare pnpm@11.3.0 --activate
 
 ENV NODE_ENV=production
 ENV INKOS_STUDIO_PORT=4567
-ENV INKOS_PROJECT_ROOT=/data
+ENV INKOS_DATA_ROOT=/data
+ENV INKOS_MULTI_USER=1
 
 COPY --from=builder /app ./
 COPY docker/entrypoint.sh /usr/local/bin/inkos-docker-entrypoint

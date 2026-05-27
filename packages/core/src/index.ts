@@ -392,3 +392,48 @@ export async function sendWebhook(
   const transport = await import("./notify/webhook.js");
   await transport.sendWebhook(config, payload);
 }
+
+// Auth / multi-user
+export {
+  USERS_DIR_NAME,
+  META_DIR_NAME,
+  userProjectRoot,
+  loadUsers,
+  saveUsers,
+  loadSessions,
+  saveSessions,
+  createUser,
+  findUserByUsername,
+  findUserById,
+  authenticateUser,
+  createSession,
+  findSession,
+  deleteSession,
+  listUsers,
+  ensureLegacyMigration,
+  loadInvites,
+  createInvite,
+  listInvites,
+  revokeInvite,
+  redeemInvite,
+  changeUserPassword,
+  setUserRole,
+  deleteUser,
+  transferBookOwnership,
+  type UserRole,
+  type UserRecord,
+  type SessionRecord,
+  type UsersFile,
+  type SessionsFile,
+  type InviteRecord,
+  type InvitesFile,
+  type CreateUserInput,
+  type CreateSessionOptions,
+} from "./auth/user-store.js";
+
+export {
+  runInUserContext,
+  getCurrentUser,
+  requireCurrentUser,
+  type UserContext,
+} from "./auth/user-context.js";

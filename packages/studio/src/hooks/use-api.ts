@@ -95,7 +95,11 @@ export async function fetchJson<T>(
   }
 
   const fetchImpl = deps?.fetchImpl ?? fetch;
-  const res = await fetchImpl(url, init);
+  const res = await fetchImpl(url, { credentials: "include", ...init });
+
+  if (res.status === 401 && typeof window !== "undefined" && !url.endsWith("/auth/me")) {
+    window.dispatchEvent(new CustomEvent("inkos:unauthenticated"));
+  }
 
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));

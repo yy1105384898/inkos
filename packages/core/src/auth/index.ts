@@ -1,0 +1,32 @@
+export {
+  USERS_DIR_NAME,
+  META_DIR_NAME,
+  userProjectRoot,
+  loadUsers,
+  saveUsers,
+  loadSessions,
+  saveSessions,
+  createUser,
+  findUserByUsername,
+  findUserById,
+  authenticateUser,
+  createSession,
+  findSession,
+  deleteSession,
+  listUsers,
+  ensureLegacyMigration,
+  type UserRole,
+  type UserRecord,
+  type SessionRecord,
+  type UsersFile,
+  type SessionsFile,
+  type CreateUserInput,
+  type CreateSessionOptions,
+} from "./user-store.js";
+
+export {
+  runInUserContext,
+  getCurrentUser,
+  requireCurrentUser,
+  type UserContext,
+} from "./user-context.js";

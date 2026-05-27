@@ -3878,11 +3878,30 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 export async function startStudioServer(
   root: string,
   port = 4567,
-  options?: { readonly staticDir?: string },
+  options?: {
+    readonly staticDir?: string;
+    readonly multiUser?: boolean;
+    readonly initialAdminUsername?: string;
+    readonly initialAdminPassword?: string;
+    readonly allowOpenRegistration?: boolean;
+  },
 ): Promise<void> {
-  const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
+  const multiUser = options?.multiUser ?? (process.env.INKOS_MULTI_USER !== "0");
 
-  const app = createStudioServer(config, root);
+  let app: Hono<any>;
+  if (multiUser) {
+    const { createMultiUserStudioServer } = await import("./multi-user.js");
+    app = await createMultiUserStudioServer(root, {
+      initialAdminUsername: options?.initialAdminUsername ?? process.env.INKOS_ADMIN_USERNAME,
+      initialAdminPassword: options?.initialAdminPassword ?? process.env.INKOS_ADMIN_PASSWORD,
+      allowOpenRegistration:
+        options?.allowOpenRegistration
+        ?? (process.env.INKOS_ALLOW_REGISTRATION === "1" ? true : undefined),
+    });
+  } else {
+    const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
+    app = createStudioServer(config, root);
+  }
 
   // Serve frontend static files — single process for API + frontend
   if (options?.staticDir) {
