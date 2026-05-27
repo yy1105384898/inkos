@@ -4,6 +4,7 @@ export {
   createReadTool,
   createWriteTruthFileTool,
   createRenameEntityTool,
+  createUpdateChapterTitleTool,
   createPatchChapterTextTool,
   createEditTool,
   createWriteFileTool,

@@ -3807,9 +3807,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   // --- Radar Scan ---
 
   app.post("/api/v1/radar/scan", async (c) => {
+    const body = await readJsonBody<{ llmOverride?: unknown }>(c);
+    const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
     broadcast("radar:start", {});
     try {
-      const pipeline = new PipelineRunner(await buildPipelineConfig());
+      const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
       const result = await pipeline.runRadar();
       await saveRadarScan(root, result);
       broadcast("radar:complete", { result });

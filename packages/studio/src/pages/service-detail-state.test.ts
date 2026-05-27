@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { getBrowserServiceSelection } from "../lib/browser-service-config";
 import {
   deleteBrowserServiceConfig,
   deleteServiceConfig,
@@ -335,6 +336,10 @@ describe("saveBrowserServiceConfig", () => {
       label: "YANGYANG",
       apiKey: "sk-browser",
       defaultModel: "gpt-5.4",
+    });
+    expect(getBrowserServiceSelection()).toEqual({
+      service: "yynewapi",
+      model: "gpt-5.4",
     });
   });
 

@@ -488,6 +488,7 @@ describe("runAgentSession cache — bookId switch", () => {
       "read",
       "write_truth_file",
       "rename_entity",
+      "update_chapter_title",
       "patch_chapter_text",
       "grep",
       "ls",

@@ -2,7 +2,7 @@ import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { PipelineRunner } from "../pipeline/runner.js";
 import { type ReviseMode } from "../agents/reviser.js";
-import { readFile, writeFile, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, readdir, rename, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { StateManager } from "../state/manager.js";
 import { assertSafeTruthFileName, createInteractionToolsFromDeps } from "../interaction/project-tools.js";
@@ -580,6 +580,100 @@ export function createPatchChapterTextTool(
       };
       const summary = result.__interaction?.responseText ?? `Patched chapter ${params.chapterNumber} for "${bookId}".`;
       return textResult(summary);
+    },
+  };
+}
+
+const UpdateChapterTitleParams = Type.Object({
+  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
+  chapterNumber: Type.Number({ description: "Chapter number whose title should be updated." }),
+  title: Type.String({ description: "New chapter title. Do not include Markdown heading markup." }),
+});
+
+function safeChapterFileTitle(title: string): string {
+  const cleaned = title
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (cleaned || "untitled").slice(0, 80);
+}
+
+function chapterHeading(chapterNumber: number, title: string, language?: string): string {
+  if (/^\s*(第\s*\d+\s*章|chapter\s+\d+\b)/i.test(title)) {
+    return `# ${title}`;
+  }
+  return language === "en"
+    ? `# Chapter ${chapterNumber}: ${title}`
+    : `# 第${chapterNumber}章 ${title}`;
+}
+
+function replaceFirstMarkdownHeading(content: string, heading: string): string {
+  if (/^# .*(?:\r?\n|$)/.test(content)) {
+    return content.replace(/^# .*(?:\r?\n|$)/, `${heading}\n`);
+  }
+  return `${heading}\n\n${content}`;
+}
+
+export function createUpdateChapterTitleTool(
+  projectRoot: string,
+  activeBookId: string | null,
+): AgentTool<typeof UpdateChapterTitleParams> {
+  const state = new StateManager(projectRoot);
+  return {
+    name: "update_chapter_title",
+    description:
+      "Update an existing chapter title. This safely syncs chapters/index.json, the chapter Markdown heading, and the chapter filename.",
+    label: "Update Chapter Title",
+    parameters: UpdateChapterTitleParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
+      const bookId = resolveToolBookId("update_chapter_title", params.bookId, activeBookId);
+      const chapterNumber = Math.trunc(params.chapterNumber);
+      const title = params.title.trim().replace(/^#+\s*/, "");
+      if (!Number.isInteger(chapterNumber) || chapterNumber < 1) {
+        return textResult("update_chapter_title failed: chapterNumber must be a positive integer.");
+      }
+      if (!title) {
+        return textResult("update_chapter_title failed: title cannot be empty.");
+      }
+
+      const index = [...(await state.loadChapterIndex(bookId))];
+      const chapter = index.find((entry) => entry.number === chapterNumber);
+      if (!chapter) {
+        return textResult(`update_chapter_title failed: chapter ${chapterNumber} was not found in "${bookId}".`);
+      }
+
+      const now = new Date().toISOString();
+      await state.saveChapterIndex(bookId, index.map((entry) => entry.number === chapterNumber
+        ? { ...entry, title, updatedAt: now }
+        : entry));
+
+      const chaptersDir = join(state.bookDir(bookId), "chapters");
+      const padded = String(chapterNumber).padStart(4, "0");
+      const files = await readdir(chaptersDir).catch(() => []);
+      const markdownFile = files.find((file) => file.startsWith(`${padded}_`) && file.endsWith(".md"));
+      let fileRenamed = false;
+      let headingUpdated = false;
+      if (markdownFile) {
+        const oldPath = join(chaptersDir, markdownFile);
+        const book = await state.loadBookConfig(bookId).catch(() => undefined);
+        const content = await readFile(oldPath, "utf-8");
+        await writeFile(oldPath, replaceFirstMarkdownHeading(content, chapterHeading(chapterNumber, title, book?.language)), "utf-8");
+        headingUpdated = true;
+
+        const nextFile = `${padded}_${safeChapterFileTitle(title)}.md`;
+        if (nextFile !== markdownFile) {
+          await rename(oldPath, join(chaptersDir, nextFile));
+          fileRenamed = true;
+        }
+      }
+
+      return textResult(
+        [
+          `Updated chapter ${chapterNumber} title for "${bookId}" to "${title}".`,
+          headingUpdated ? "Markdown heading synced." : "Markdown file was not found; index updated only.",
+          fileRenamed ? "Chapter filename synced." : "Chapter filename already matched or was unavailable.",
+        ].join("\n"),
+      );
     },
   };
 }

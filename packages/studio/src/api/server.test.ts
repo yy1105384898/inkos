@@ -692,6 +692,43 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("allows radar scans to use the browser-selected text model", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/radar/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        llmOverride: {
+          scope: "browser",
+          service: "yynewapi",
+          model: "gpt-5.4",
+          apiKey: "sk-browser",
+          baseUrl: "https://yynewapi.yangyangnj.top/v1",
+          apiFormat: "chat",
+          stream: true,
+          temperature: 0.7,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(runRadarMock).toHaveBeenCalledTimes(1);
+    expect(pipelineConfigs.at(-1)).toMatchObject({
+      model: "gpt-5.4",
+      defaultLLMConfig: expect.objectContaining({
+        service: "yynewapi",
+        model: "gpt-5.4",
+        apiKey: "sk-browser",
+        baseUrl: "https://yynewapi.yangyangnj.top/v1",
+        apiFormat: "chat",
+        stream: true,
+        temperature: 0.7,
+      }),
+    });
+  });
+
   it("persists Studio radar scans and exposes scan history", async () => {
     runRadarMock.mockResolvedValueOnce({
       timestamp: "2026-05-14T12:00:00.000Z",

@@ -10,6 +10,7 @@ import {
   createShortFictionRunTool,
   createPatchChapterTextTool,
   createRenameEntityTool,
+  createUpdateChapterTitleTool,
   createWriteFileTool,
   createWriteTruthFileTool,
 } from "../agent/agent-tools.js";
@@ -101,6 +102,25 @@ describe("agent deterministic writing tools", () => {
         ]),
       }),
     ]);
+  });
+
+  it("updates chapter titles through a dedicated active-book tool", async () => {
+    const tool = createUpdateChapterTitleTool(root, "harbor");
+
+    const result = await tool.execute("tool-title", {
+      chapterNumber: 3,
+      title: "老周的烟头掉了半截",
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    await expect(state.loadChapterIndex("harbor")).resolves.toEqual([
+      expect.objectContaining({
+        number: 3,
+        title: "老周的烟头掉了半截",
+      }),
+    ]);
+    await expect(readFile(join(state.bookDir("harbor"), "chapters", "0003_老周的烟头掉了半截.md"), "utf-8"))
+      .resolves.toContain("# 第3章 老周的烟头掉了半截");
   });
 
   it("requires an explicit title when the architect sub-agent creates a book", async () => {

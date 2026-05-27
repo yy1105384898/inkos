@@ -68,6 +68,7 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).toContain("read");
       expect(prompt).toContain("write_truth_file");
       expect(prompt).toContain("rename_entity");
+      expect(prompt).toContain("update_chapter_title");
       expect(prompt).toContain("patch_chapter_text");
       expect(prompt).toContain("short_fiction_run");
       expect(prompt).toContain("grep");

@@ -8,6 +8,7 @@ import { buildAgentSystemPrompt } from "./agent-system-prompt.js";
 import {
   createPatchChapterTextTool,
   createRenameEntityTool,
+  createUpdateChapterTitleTool,
   createSubAgentTool,
   createReadTool,
   createGrepTool,
@@ -490,6 +491,7 @@ function createAgentToolsForMode(params: {
     createReadTool(params.projectRoot, { allowSystemPaths: params.allowSystemFileRead }),
     createWriteTruthFileTool(params.pipeline, params.projectRoot, params.bookId),
     createRenameEntityTool(params.pipeline, params.projectRoot, params.bookId),
+    createUpdateChapterTitleTool(params.projectRoot, params.bookId),
     createPatchChapterTextTool(params.pipeline, params.projectRoot, params.bookId),
     createGrepTool(params.projectRoot),
     createLsTool(params.projectRoot),
