@@ -3,7 +3,6 @@ import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import { useColors } from "../hooks/use-colors";
 import { fetchJson } from "../hooks/use-api";
-import { withBrowserLlmOverride } from "../lib/browser-service-config";
 import { TrendingUp, Loader2, Target, Clock } from "lucide-react";
 
 interface Recommendation {
@@ -57,7 +56,7 @@ export function RadarView({ nav, theme, t }: { nav: Nav; theme: Theme; t: TFunct
       const data = await fetchJson<RadarResult>("/radar/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(withBrowserLlmOverride({})),
+        body: JSON.stringify({}),
       });
       setResult(data);
       await loadHistory();

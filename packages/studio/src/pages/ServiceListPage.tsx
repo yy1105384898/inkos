@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, Plus, Search, X } from "lucide-react";
 import { GROUP_DESCRIPTIONS, GROUP_LABELS, GROUP_ORDER, GROUP_SHORT_LABELS } from "../constants/service-groups";
 import { fetchJson } from "../hooks/use-api";
-import { getBrowserCoverConfig, saveBrowserCoverConfig } from "../lib/browser-service-config";
 import { useServiceStore } from "../store/service";
 import type { EndpointGroup, ServiceInfo } from "../store/service";
 import { ServiceQuickLinks, getServiceQuickLinks } from "../components/ServiceQuickLinks";
@@ -83,15 +82,14 @@ function CoverConfigCard() {
       .then((payload) => {
         if (cancelled) return;
         setProviders(payload.providers);
-        const local = getBrowserCoverConfig();
-        const nextService = payload.service ?? local?.service ?? payload.providers[0]?.service ?? "yynewapi";
+        const nextService = payload.service ?? payload.providers[0]?.service ?? "yynewapi";
         const provider = payload.providers.find((item) => item.service === nextService) ?? payload.providers[0];
         setService(nextService);
-        setModel(payload.model ?? local?.model ?? provider?.defaultModel ?? "gpt-image-2");
+        setModel(payload.model ?? provider?.defaultModel ?? "gpt-image-2");
         return fetchJson<{ apiKey?: string }>(`/cover/secret/${encodeURIComponent(nextService)}`)
           .then((secret) => {
             if (cancelled) return;
-            setApiKey(secret.apiKey ?? local?.apiKey ?? "");
+            setApiKey(secret.apiKey ?? "");
           });
       })
       .then(() => {
@@ -123,11 +121,6 @@ function CoverConfigCard() {
     setStatus("saving");
     setMessage("");
     try {
-      saveBrowserCoverConfig({
-        service: provider.service,
-        model,
-        apiKey: apiKey.trim(),
-      });
       await fetchJson(`/cover/secret/${encodeURIComponent(provider.service)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },

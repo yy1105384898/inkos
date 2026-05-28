@@ -2,7 +2,6 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
-import { getBrowserServiceSelection } from "../lib/browser-service-config";
 import { getServerServiceSelection } from "../lib/server-service-config";
 import { chatSelectors, useChatStore } from "../store/chat";
 import { useServiceStore } from "../store/service";
@@ -121,10 +120,10 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       try {
         selected = await getServerServiceSelection();
       } catch {
-        // Fall back to the current device selection when the server has none or is unavailable.
+        // Server selection is optional.
       }
       if (cancelled) return;
-      setConfiguredModelSelection(selected ?? getBrowserServiceSelection());
+      setConfiguredModelSelection(selected);
       setServiceConfigLoaded(true);
     })();
     return () => { cancelled = true; };

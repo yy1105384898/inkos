@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { fetchJson } from "../../hooks/use-api";
-import { findBrowserService, loadBrowserServices } from "../../lib/browser-service-config";
 import type { ModelInfo, ServiceInfo, ServiceStore } from "./types";
 
 interface GroupPayload {
@@ -23,27 +22,7 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
     set({ servicesLoading: true });
     try {
       const data = await fetchJson<{ services: ReadonlyArray<ServiceInfo> }>("/services");
-      const browserServices = loadBrowserServices();
-      const browserById = new Map(browserServices.map((service) => [service.service, service]));
-      const services = (data.services ?? [])
-        .filter((service) => !service.service.startsWith("custom:"))
-        .map((service) => ({
-          ...service,
-          connected: service.connected || browserById.has(service.service),
-          ...(browserById.has(service.service)
-            ? { scope: "browser" as const }
-            : service.connected
-              ? { scope: "server" as const }
-              : {}),
-        }));
-      for (const browser of browserServices.filter((service) => service.service.startsWith("custom:"))) {
-        services.push({
-          service: browser.service,
-          label: browser.label,
-          connected: true,
-          scope: "browser",
-        });
-      }
+      const services = data.services ?? [];
       set({ services, servicesLoading: false });
     } catch {
       set({ servicesLoading: false });
@@ -93,19 +72,9 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
     if (get().liveModelsLoading[service]) return;
     set((s) => ({ liveModelsLoading: { ...s.liveModelsLoading, [service]: true } }));
     try {
-      const local = findBrowserService(service);
-      const data = local
-        ? await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
-          "/browser-services/models",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(local),
-          },
-        )
-        : await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
-          `/services/${encodeURIComponent(service)}/models`,
-        );
+      const data = await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
+        `/services/${encodeURIComponent(service)}/models`,
+      );
       set((s) => ({
         modelsByService: { ...s.modelsByService, [service]: data.models ?? [] },
         liveModelsLoading: { ...s.liveModelsLoading, [service]: false },

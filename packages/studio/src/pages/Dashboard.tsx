@@ -1,5 +1,4 @@
 import { buildApiUrl, fetchJson, useApi, postApi } from "../hooks/use-api";
-import { withBrowserLlmOverride } from "../lib/browser-service-config";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useServiceStore } from "../store/service";
 import type { SSEMessage } from "../hooks/use-sse";
@@ -276,7 +275,7 @@ export function Dashboard({ nav, sse, theme, t }: { nav: Nav; sse: { messages: R
                 <div className="flex items-center gap-3 shrink-0 ml-6">
                   <button
                     onClick={async () => {
-                      try { await postApi(`/books/${book.id}/write-next`, withBrowserLlmOverride({})); }
+                      try { await postApi(`/books/${book.id}/write-next`, {}); }
                       catch (e) { alert(e instanceof Error ? e.message : "Write failed"); }
                     }}
                     disabled={isWriting}

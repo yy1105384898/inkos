@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { BookCreationDraft } from "@actalk/inkos-core";
 import { BookPlus, CheckCircle2, RotateCcw, Sparkles } from "lucide-react";
 import { fetchJson, useApi } from "../hooks/use-api";
-import { withBrowserLlmOverride } from "../lib/browser-service-config";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import { useColors } from "../hooks/use-colors";
@@ -565,7 +564,7 @@ export function BookCreate({ nav, theme, t }: { nav: Nav; theme: Theme; t: TFunc
     return fetchJson<AgentResponse>("/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(withBrowserLlmOverride(buildBookCreateAgentRequest(instruction, sessionId))),
+      body: JSON.stringify(buildBookCreateAgentRequest(instruction, sessionId)),
     });
   };
 
@@ -610,7 +609,7 @@ export function BookCreate({ nav, theme, t }: { nav: Nav; theme: Theme; t: TFunc
       const data = await fetchJson<{ status?: string; bookId?: string }>("/books/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(withBrowserLlmOverride(payload)),
+        body: JSON.stringify(payload),
       });
       if (!data.bookId) {
         throw new Error(projectLang === "zh" ? "创建请求没有返回书籍 ID。" : "Create request did not return a book id.");

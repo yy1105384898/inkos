@@ -7,7 +7,6 @@ import type {
   SessionSummary,
 } from "../../types";
 import { buildApiUrl, fetchJson } from "../../../../hooks/use-api";
-import { getBrowserLlmOverride, setBrowserServiceSelection } from "../../../../lib/browser-service-config";
 import { attachSessionStreamListeners } from "./stream-events";
 import {
   bookKey,
@@ -97,7 +96,6 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     })),
 
   setSelectedModel: (model, service) => {
-    setBrowserServiceSelection({ model, service });
     void fetchJson("/services/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -364,7 +362,6 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
           sessionId,
           model: selectedModel,
           service: selectedService,
-          llmOverride: getBrowserLlmOverride(selectedService, selectedModel),
         }),
       });
 

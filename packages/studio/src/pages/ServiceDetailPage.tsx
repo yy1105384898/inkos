@@ -4,14 +4,10 @@ import { useServiceStore } from "../store/service";
 import { Eye, EyeOff, Loader2, ArrowLeft, Trash2 } from "lucide-react";
 import { ServiceQuickLinks } from "../components/ServiceQuickLinks";
 import {
-  deleteBrowserServiceConfig,
   deleteServiceConfig,
   matchServiceConfigEntryForDetail,
-  probeBrowserServiceForDetail,
   probeServiceForDetail,
-  readBrowserServiceForDetail,
   rehydrateServiceConnectionStatus,
-  saveBrowserServiceConfig,
   saveServiceConfig,
   type ServiceDetailConnectionStatus as ConnectionStatus,
   type ServiceDetailDetectedConfig as DetectedConfig,
@@ -61,7 +57,6 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const [detectedModel, setDetectedModel] = useState<string>("");
   const [detectedConfig, setDetectedConfig] = useState<DetectedConfig | null>(null);
   const [verifiedProbe, setVerifiedProbe] = useState<VerifiedProbe | null>(null);
-  const [storageScope, setStorageScope] = useState<"browser" | "shared">("shared");
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
@@ -71,26 +66,6 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const storeModels = useServiceStore((s) => s.modelsByService[effectiveServiceId]);
 
   useEffect(() => {
-    if (storageScope === "browser") {
-      const local = readBrowserServiceForDetail(effectiveServiceId);
-      if (local) {
-        setApiKey(local.apiKey);
-        if (isCustom) {
-          setCustomName(local.label);
-          setBaseUrl(local.baseUrl ?? "");
-        }
-        setApiFormat(local.apiFormat);
-        setStream(local.stream);
-        setTemperature(String(local.temperature));
-        setDetectedModel(local.defaultModel ?? "");
-      } else if (serviceId !== "custom") {
-        setApiKey("");
-        setDetectedModel("");
-      }
-      setVerifiedProbe(null);
-      setStatus({ state: "idle" });
-      return;
-    }
     let cancelled = false;
     void fetchJson<{ services: Array<Record<string, unknown>> }>("/services/config")
       .then((data) => {
@@ -107,10 +82,9 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [effectiveServiceId, isCustom, persistedCustomName, serviceId, storageScope]);
+  }, [isCustom, persistedCustomName, serviceId]);
 
   useEffect(() => {
-    if (storageScope === "browser") return;
     let cancelled = false;
     void rehydrateServiceConnectionStatus({
       effectiveServiceId,
@@ -142,21 +116,18 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     isCustom,
     setStoreModels,
     stream,
-    storageScope,
     svc?.connected,
   ]);
 
   useEffect(() => {
-    if (storageScope !== "browser" || !svc?.connected) return;
+    if (!svc?.connected) return;
     void fetchLiveModels(effectiveServiceId);
-  }, [effectiveServiceId, fetchLiveModels, storageScope, svc?.connected]);
+  }, [effectiveServiceId, fetchLiveModels, svc?.connected]);
 
   if (loading) return <DetailSkeleton />;
 
   // -- Derived state --
-  const isConnected = storageScope === "browser"
-    ? Boolean(readBrowserServiceForDetail(effectiveServiceId))
-    : Boolean(apiKey.trim());
+  const isConnected = Boolean(apiKey.trim());
   const models = status.state === "connected" ? status.models : (storeModels ?? []);
   const isBusy = status.state === "testing" || status.state === "saving";
 
@@ -174,7 +145,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     setApiKey(trimmedKey);
     setStatus({ state: "testing" });
     try {
-      const result = await (storageScope === "browser" ? probeBrowserServiceForDetail : probeServiceForDetail)(effectiveServiceId, {
+      const result = await probeServiceForDetail(effectiveServiceId, {
         apiKey: trimmedKey,
         apiFormat,
         stream,
@@ -216,11 +187,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     if (!window.confirm(`删除“${label}”的配置和密钥？`)) return;
     setStatus({ state: "saving" });
     try {
-      if (storageScope === "browser") {
-        deleteBrowserServiceConfig(effectiveServiceId);
-      } else {
-        await deleteServiceConfig(effectiveServiceId);
-      }
+      await deleteServiceConfig(effectiveServiceId);
       clearStoreModels(effectiveServiceId);
       await refreshServices();
       nav.toServices();
@@ -238,18 +205,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     }
     setStatus({ state: "saving" });
     try {
-      const result = await (storageScope === "browser" ? saveBrowserServiceConfig({
-        effectiveServiceId,
-        label,
-        isCustom,
-        apiKey: trimmedKey,
-        baseUrl,
-        apiFormat,
-        stream,
-        temperature,
-        detectedModel,
-        verifiedProbe,
-      }) : saveServiceConfig({
+      const result = await saveServiceConfig({
         effectiveServiceId,
         serviceId,
         isCustom,
@@ -261,7 +217,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
         temperature,
         detectedModel,
         verifiedProbe,
-      }));
+      });
       if (result.status.state === "connected") {
         if (result.detectedConfig?.apiFormat) setApiFormat(result.detectedConfig.apiFormat);
         if (typeof result.detectedConfig?.stream === "boolean") setStream(result.detectedConfig.stream);
@@ -304,31 +260,6 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       <ServiceQuickLinks serviceId={serviceId} />
 
       <div className="space-y-5">
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground/70">保存位置</p>
-          <div className="inline-flex rounded-lg border border-border/60 bg-background p-1">
-            <button
-              type="button"
-              onClick={() => setStorageScope("browser")}
-              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${storageScope === "browser" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              仅此浏览器
-            </button>
-            <button
-              type="button"
-              onClick={() => setStorageScope("shared")}
-              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${storageScope === "shared" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              当前用户
-            </button>
-          </div>
-          <p className="text-xs text-muted-foreground/60">
-            {storageScope === "browser"
-              ? "Key 只保存在当前浏览器，不写入项目或服务器。"
-              : "Key 保存到当前登录用户，同账号手机端和网页端可共用。"}
-          </p>
-        </div>
-
         {/* Custom fields */}
         {isCustom && (
         <div className="grid grid-cols-2 gap-4">
@@ -368,7 +299,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
           <button onClick={handleSave} disabled={isBusy}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
             {status.state === "saving" && <Loader2 size={12} className="animate-spin" />}
-            {storageScope === "browser" ? "保存到此浏览器" : "保存到当前用户"}
+            保存到当前用户
           </button>
           {(isConnected || isCustom) && (
             <button onClick={handleDelete} disabled={isBusy}
