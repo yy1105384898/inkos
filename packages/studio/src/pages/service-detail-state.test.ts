@@ -1,25 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { getBrowserServiceSelection } from "../lib/browser-service-config";
 import {
-  deleteBrowserServiceConfig,
   deleteServiceConfig,
   matchServiceConfigEntryForDetail,
-  readBrowserServiceForDetail,
   rehydrateServiceConnectionStatus,
-  saveBrowserServiceConfig,
   saveServiceConfig,
 } from "./service-detail-state";
-
-function installLocalStorageMock() {
-  const values = new Map<string, string>();
-  vi.stubGlobal("window", {
-    localStorage: {
-      getItem: vi.fn((key: string) => values.get(key) ?? null),
-      setItem: vi.fn((key: string, value: string) => { values.set(key, value); }),
-      removeItem: vi.fn((key: string) => { values.delete(key); }),
-    },
-  });
-}
 
 describe("rehydrateServiceConnectionStatus", () => {
   it("loads saved key without blocking on model probing", async () => {
@@ -293,60 +278,6 @@ describe("saveServiceConfig", () => {
       },
     ]);
     expect(result.status).toEqual({ state: "connected", models: [{ id: "qwen3.6:35b-a3b" }] });
-  });
-});
-
-describe("saveBrowserServiceConfig", () => {
-  it("stores key in browser storage only after validation", async () => {
-    installLocalStorageMock();
-    const calls: string[] = [];
-    const fetchJsonImpl = vi.fn(async (path: string, init?: { body?: string }) => {
-      calls.push(path);
-      expect(init?.body ? JSON.parse(init.body) : null).toEqual({
-        service: "yynewapi",
-        apiKey: "sk-browser",
-        apiFormat: "chat",
-        stream: true,
-      });
-      return {
-        ok: true,
-        models: [{ id: "gpt-5.4" }],
-        selectedModel: "gpt-5.4",
-        detected: { apiFormat: "chat", stream: true },
-      };
-    });
-
-    const result = await saveBrowserServiceConfig({
-      effectiveServiceId: "yynewapi",
-      label: "YANGYANG",
-      isCustom: false,
-      apiKey: "sk-browser",
-      baseUrl: "",
-      apiFormat: "chat",
-      stream: true,
-      temperature: "0.7",
-      detectedModel: "",
-      fetchJsonImpl: fetchJsonImpl as never,
-    });
-
-    expect(calls).toEqual(["/browser-services/test"]);
-    expect(result.status).toEqual({ state: "connected", models: [{ id: "gpt-5.4" }] });
-    expect(readBrowserServiceForDetail("yynewapi")).toMatchObject({
-      service: "yynewapi",
-      label: "YANGYANG",
-      apiKey: "sk-browser",
-      defaultModel: "gpt-5.4",
-    });
-    expect(getBrowserServiceSelection()).toEqual({
-      service: "yynewapi",
-      model: "gpt-5.4",
-    });
-  });
-
-  it("deletes browser services without calling the server", () => {
-    installLocalStorageMock();
-    deleteBrowserServiceConfig("yynewapi");
-    expect(readBrowserServiceForDetail("yynewapi")).toBeUndefined();
   });
 });
 

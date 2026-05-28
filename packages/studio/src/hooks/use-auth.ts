@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { buildApiUrl } from "../lib/api-base";
 import { apiFetch, clearNativeApiCookies } from "../lib/api-client";
-import { syncBrowserServiceConfigsToServer } from "../lib/server-service-config";
 
 export interface AuthUser {
   readonly id: string;
@@ -50,7 +49,6 @@ export function useAuth(): AuthState {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [syncedUserId, setSyncedUserId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -79,12 +77,6 @@ export function useAuth(): AuthState {
   }, [refresh]);
 
   useEffect(() => {
-    if (!user || syncedUserId === user.id) return;
-    setSyncedUserId(user.id);
-    void syncBrowserServiceConfigsToServer().catch(() => {});
-  }, [syncedUserId, user]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = () => {
       setUser(null);
@@ -98,8 +90,6 @@ export function useAuth(): AuthState {
     try {
       const json = await postAuth<{ user: AuthUser }>("login", { username, password });
       setUser(json.user);
-      setSyncedUserId(json.user.id);
-      await syncBrowserServiceConfigsToServer().catch(() => {});
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -112,8 +102,6 @@ export function useAuth(): AuthState {
     try {
       const json = await postAuth<{ user: AuthUser }>("register", { username, password, invite });
       setUser(json.user);
-      setSyncedUserId(json.user.id);
-      await syncBrowserServiceConfigsToServer().catch(() => {});
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -130,7 +118,6 @@ export function useAuth(): AuthState {
     } finally {
       clearNativeApiCookies();
       setUser(null);
-      setSyncedUserId(null);
     }
   }, []);
 
