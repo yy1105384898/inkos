@@ -264,7 +264,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     : "Tell me what you want to write \u2014 genre, world, protagonist, core conflict";
 
   return (
-    <div className="flex flex-col h-full flex-1 min-w-0">
+    <div className="chat-page-root flex flex-col h-full flex-1 min-w-0">
       {/* Message scroll area */}
       <div
         ref={scrollRef}
@@ -372,7 +372,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
 
       {/* Quick actions (only when a book is active) */}
       {hasBook && (
-        <div className="shrink-0 max-w-3xl mx-auto w-full px-4">
+        <div className="chat-quick-actions shrink-0 max-w-3xl mx-auto w-full px-4">
           <QuickActions
             onAction={handleQuickAction}
             disabled={loading || !activeSessionId}
@@ -382,7 +382,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       )}
 
       {/* Input area */}
-      <div className="shrink-0 border-t border-border/40 px-4 py-3">
+      <div className="chat-input-area shrink-0 border-t border-border/40 px-4 py-3">
         <div className="max-w-3xl mx-auto">
             <div className="rounded-xl bg-secondary/30 transition-all">
               <div className="flex items-center gap-2 px-3 py-2">
@@ -457,7 +457,11 @@ function ModelPickerContent({
   const filtered = useMemo(() => filterModelGroups(groupedModels, search), [groupedModels, search]);
 
   return (
-    <DropdownMenuContent side="top" align="start" className="w-64 max-h-80 flex flex-col">
+    <DropdownMenuContent
+      side="top"
+      align="start"
+      className="w-[min(22rem,calc(100vw-2rem))] max-h-[min(24rem,70vh)] flex flex-col"
+    >
       <div className="px-2 py-1.5 border-b border-border/30">
         <input
           type="text"
@@ -465,6 +469,7 @@ function ModelPickerContent({
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索模型..."
           className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground/40"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         />
@@ -480,8 +485,8 @@ function ModelPickerContent({
               return (
                 <DropdownMenuItem
                   key={`${group.service}:${m.id}`}
-                  onClick={() => onSelect(m.id, group.service)}
-                  className={isSelected ? "bg-muted/50" : ""}
+                  onSelect={() => onSelect(m.id, group.service)}
+                  className={`min-h-10 cursor-pointer touch-manipulation ${isSelected ? "bg-muted/50" : ""}`}
                 >
                   <div className="flex flex-1 items-center justify-between">
                     <span className="text-sm">{m.name ?? m.id}</span>
@@ -499,7 +504,7 @@ function ModelPickerContent({
         )}
       </div>
       <div className="border-t border-border/30">
-        <DropdownMenuItem onClick={onManage} className="text-primary">
+        <DropdownMenuItem onSelect={onManage} className="min-h-10 cursor-pointer touch-manipulation text-primary">
           管理服务商
         </DropdownMenuItem>
       </div>
