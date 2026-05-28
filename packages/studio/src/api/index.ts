@@ -16,7 +16,7 @@ const port = parseInt(process.env.INKOS_STUDIO_PORT ?? "4567", 10);
 
 // Find studio package root (2 levels up from src/api/)
 const studioRoot = resolve(__dirname, "../..");
-const distDir = join(studioRoot, "dist");
+const distDir = join(studioRoot, "dist", "client");
 
 // Auto-build frontend if dist/ doesn't exist
 if (!existsSync(join(distDir, "index.html"))) {

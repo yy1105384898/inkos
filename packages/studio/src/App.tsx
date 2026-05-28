@@ -27,8 +27,17 @@ import { useTheme } from "./hooks/use-theme";
 import { useI18n } from "./hooks/use-i18n";
 import { useAuth } from "./hooks/use-auth";
 import { postApi, putApi, useApi } from "./hooks/use-api";
-import { Sun, Moon, LogOut } from "lucide-react";
-import { House } from "lucide-react";
+import {
+  Sun,
+  Moon,
+  LogOut,
+  House,
+  Library,
+  SquarePen,
+  MessageSquareText,
+  Wrench,
+  Settings,
+} from "lucide-react";
 
 export type { HashRoute as Route } from "./hooks/use-hash-route";
 
@@ -140,12 +149,14 @@ export function App() {
   return (
     <div className="h-screen bg-background text-foreground flex overflow-hidden font-sans">
       {/* Left Sidebar */}
-      <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
+      <div className="hidden h-full shrink-0 md:flex">
+        <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
+      </div>
 
       {/* Center Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-background/30 backdrop-blur-sm">
         {/* Header Strip */}
-        <header className="h-14 shrink-0 flex items-center justify-between px-8 border-b border-border/40">
+        <header className="hidden h-14 shrink-0 items-center justify-between px-8 border-b border-border/40 md:flex">
           <div className="flex items-center gap-2">
              <button
                onClick={nav.toDashboard}
@@ -210,7 +221,7 @@ export function App() {
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 relative overflow-y-auto scroll-smooth">
+        <main className="mobile-main flex-1 relative overflow-y-auto scroll-smooth">
           {route.page === "dashboard" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <Dashboard nav={nav} sse={sse} theme={theme} t={t} />
@@ -323,7 +334,83 @@ export function App() {
             </div>
           )}
         </main>
+        <MobileBottomNav nav={nav} activePage={activePage} lang={currentLang} />
       </div>
     </div>
+  );
+}
+
+function MobileBottomNav({
+  nav,
+  activePage,
+  lang,
+}: {
+  nav: {
+    toDashboard: () => void;
+    toBookCreate: () => void;
+    toChat: () => void;
+    toStyle: () => void;
+    toServices: () => void;
+  };
+  activePage: string;
+  lang: string;
+}) {
+  const isZh = lang !== "en";
+  const items = [
+    {
+      key: "dashboard",
+      label: isZh ? "书架" : "Books",
+      icon: Library,
+      active: activePage === "dashboard",
+      onClick: nav.toDashboard,
+    },
+    {
+      key: "create",
+      label: isZh ? "新建" : "Create",
+      icon: SquarePen,
+      active: activePage === "book-create",
+      onClick: nav.toBookCreate,
+      primary: true,
+    },
+    {
+      key: "chapter",
+      label: isZh ? "创作" : "Write",
+      icon: MessageSquareText,
+      active: activePage === "chat" || activePage.startsWith("book:"),
+      onClick: nav.toChat,
+    },
+    {
+      key: "tools",
+      label: isZh ? "工具" : "Tools",
+      icon: Wrench,
+      active: ["style", "import", "radar", "doctor", "genres"].includes(activePage),
+      onClick: nav.toStyle,
+    },
+    {
+      key: "settings",
+      label: isZh ? "设置" : "Settings",
+      icon: Settings,
+      active: activePage === "services" || activePage === "service-detail",
+      onClick: nav.toServices,
+    },
+  ];
+
+  return (
+    <nav className="mobile-bottom-nav md:hidden" aria-label={isZh ? "底部导航" : "Bottom navigation"}>
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={item.onClick}
+            className={`mobile-bottom-nav__item ${item.active ? "is-active" : ""} ${item.primary ? "is-primary" : ""}`}
+          >
+            <Icon size={20} strokeWidth={2} />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }

@@ -1,24 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { localizeKnownRuntimeMessage } from "../lib/error-copy";
+import { buildApiPath, buildApiUrl } from "../lib/api-base";
+import { apiFetch } from "../lib/api-client";
 
-const BASE = "/api/v1";
 const API_INVALIDATE_EVENT = "inkos:api-invalidate";
 
 interface ApiInvalidateDetail {
   readonly paths: ReadonlyArray<string>;
 }
 
-export function buildApiUrl(path: string): string | null {
-  const normalized = String(path ?? "").trim();
-  if (!normalized) return null;
-  if (normalized.startsWith(`${BASE}/`) || normalized === BASE) {
-    return normalized;
-  }
-  return normalized.startsWith("/") ? `${BASE}${normalized}` : `${BASE}/${normalized}`;
-}
+export { buildApiPath, buildApiUrl };
 
 export function deriveInvalidationPaths(path: string): ReadonlyArray<string> {
-  const normalized = buildApiUrl(path);
+  const normalized = buildApiPath(path);
   if (!normalized) return [];
 
   if (normalized === "/api/v1/books/create") {
@@ -89,15 +83,15 @@ export async function fetchJson<T>(
   init: RequestInit = {},
   deps?: { readonly fetchImpl?: typeof fetch },
 ): Promise<T> {
+  const apiPath = buildApiPath(path);
   const url = buildApiUrl(path);
-  if (!url) {
+  if (!apiPath || !url) {
     throw new Error("API path is required");
   }
 
-  const fetchImpl = deps?.fetchImpl ?? fetch;
-  const res = await fetchImpl(url, { credentials: "include", ...init });
+  const res = await apiFetch(url, init, deps?.fetchImpl);
 
-  if (res.status === 401 && typeof window !== "undefined" && !url.endsWith("/auth/me")) {
+  if (res.status === 401 && typeof window !== "undefined" && !apiPath.endsWith("/auth/me")) {
     window.dispatchEvent(new CustomEvent("inkos:unauthenticated"));
   }
 
@@ -127,8 +121,8 @@ export function useApi<T>(path: string) {
   const [error, setError] = useState<string | null>(null);
 
   const refetch = useCallback(async () => {
-    const url = buildApiUrl(path);
-    if (!url) {
+    const apiPath = buildApiPath(path);
+    if (!apiPath) {
       setData(null);
       setError(null);
       setLoading(false);
@@ -138,7 +132,7 @@ export function useApi<T>(path: string) {
     setLoading(true);
     setError(null);
     try {
-      const json = await fetchJson<T>(url);
+      const json = await fetchJson<T>(apiPath);
       setData(json);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -152,14 +146,14 @@ export function useApi<T>(path: string) {
   }, [refetch]);
 
   useEffect(() => {
-    const url = buildApiUrl(path);
-    if (!url || typeof window === "undefined") {
+    const apiPath = buildApiPath(path);
+    if (!apiPath || typeof window === "undefined") {
       return;
     }
 
     const handleInvalidate = (event: Event) => {
       const detail = (event as CustomEvent<ApiInvalidateDetail>).detail;
-      if (!detail?.paths.includes(url)) return;
+      if (!detail?.paths.includes(apiPath)) return;
       void refetch();
     };
 

@@ -41,7 +41,7 @@ function ServiceCard({ svc, onClick }: { svc: ServiceInfo; onClick: () => void }
           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${svc.connected ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
         </div>
         <span className="text-xs text-muted-foreground/60">
-          {svc.connected ? "本浏览器已配置" : "未配置"}
+          {svc.connected ? "当前用户已配置" : "未配置"}
         </span>
       </button>
       {quickLinks.length > 0 && (
@@ -84,11 +84,18 @@ function CoverConfigCard() {
         if (cancelled) return;
         setProviders(payload.providers);
         const local = getBrowserCoverConfig();
-        const nextService = local?.service ?? payload.providers[0]?.service ?? "yynewapi";
+        const nextService = payload.service ?? local?.service ?? payload.providers[0]?.service ?? "yynewapi";
         const provider = payload.providers.find((item) => item.service === nextService) ?? payload.providers[0];
         setService(nextService);
-        setModel(local?.model ?? provider?.defaultModel ?? "gpt-image-2");
-        setApiKey(local?.apiKey ?? "");
+        setModel(payload.model ?? local?.model ?? provider?.defaultModel ?? "gpt-image-2");
+        return fetchJson<{ apiKey?: string }>(`/cover/secret/${encodeURIComponent(nextService)}`)
+          .then((secret) => {
+            if (cancelled) return;
+            setApiKey(secret.apiKey ?? local?.apiKey ?? "");
+          });
+      })
+      .then(() => {
+        if (cancelled) return;
         setStatus("idle");
       })
       .catch((error) => {
@@ -103,6 +110,9 @@ function CoverConfigCard() {
     const provider = providers.find((item) => item.service === nextService);
     setService(nextService);
     setModel(provider?.defaultModel ?? "gpt-image-2");
+    void fetchJson<{ apiKey?: string }>(`/cover/secret/${encodeURIComponent(nextService)}`)
+      .then((secret) => setApiKey(secret.apiKey ?? ""))
+      .catch(() => setApiKey(""));
     setStatus("idle");
     setMessage("");
   };
@@ -118,8 +128,18 @@ function CoverConfigCard() {
         model,
         apiKey: apiKey.trim(),
       });
+      await fetchJson(`/cover/secret/${encodeURIComponent(provider.service)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: apiKey.trim() }),
+      });
+      await fetchJson("/cover/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: provider.service, model }),
+      });
       setStatus("saved");
-      setMessage("封面 Key 已保存到此浏览器");
+      setMessage("封面 Key 已保存到当前用户");
     } catch (error) {
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "保存封面配置失败");
@@ -134,12 +154,12 @@ function CoverConfigCard() {
         <div>
           <h2 className="text-sm font-medium text-foreground">封面生成</h2>
           <p className="mt-1 text-xs text-muted-foreground/70">
-            生图 Key 只保存在当前浏览器；封面成品仍保存在服务器项目里。
+            生图 Key 保存到当前登录用户，手机端和网页端同账号可共用。
           </p>
         </div>
         {apiKey.trim() && (
           <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
-            本浏览器已配置
+            当前用户已配置
           </span>
         )}
       </div>
@@ -198,7 +218,7 @@ function CoverConfigCard() {
           className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {status === "saving" && <Loader2 size={12} className="animate-spin" />}
-          保存到此浏览器
+          保存到当前用户
         </button>
         {selected?.baseUrl && (
           <span className="text-xs text-muted-foreground/60">
@@ -304,7 +324,7 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
 
       <h1 className="font-serif text-2xl">服务商管理</h1>
       <p className="text-xs text-muted-foreground/70">
-        写作模型的 API Key 默认仅保存在当前浏览器。不同浏览器互不共享。
+        写作模型的 API Key 保存到当前登录用户，手机端和网页端同账号可共用。
       </p>
 
       <CoverConfigCard />

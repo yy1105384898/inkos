@@ -1321,7 +1321,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   const state = new StateManager(root);
   let cachedConfig = initialConfig;
 
-  app.use("/*", cors());
+  app.use("/*", cors({
+    origin: (origin) => origin || "*",
+    credentials: true,
+  }));
 
   // Structured error handler — ApiError returns typed JSON, others return 500
   app.onError((error, c) => {

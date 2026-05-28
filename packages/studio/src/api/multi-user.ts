@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import {
   authenticateUser,
@@ -29,6 +30,36 @@ import { createStudioServer } from "./server.js";
 
 export const SESSION_COOKIE = "inkos_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function shouldUseCrossSiteCookie(c: { req: { header(name: string): string | undefined; url: string } }): boolean {
+  const origin = c.req.header("Origin");
+  if (!origin) return false;
+  try {
+    return new URL(origin).origin !== new URL(c.req.url).origin;
+  } catch {
+    return false;
+  }
+}
+
+function sessionCookieOptions(c: { req: { header(name: string): string | undefined; url: string } }) {
+  const crossSite = shouldUseCrossSiteCookie(c);
+  return {
+    httpOnly: true,
+    sameSite: crossSite ? "None" as const : "Lax" as const,
+    secure: crossSite ? true : undefined,
+    path: "/",
+    maxAge: Math.floor(SESSION_TTL_MS / 1000),
+  };
+}
+
+function clearSessionCookie(c: Parameters<typeof deleteCookie>[0]) {
+  const crossSite = shouldUseCrossSiteCookie(c);
+  deleteCookie(c, SESSION_COOKIE, {
+    path: "/",
+    sameSite: crossSite ? "None" as const : "Lax" as const,
+    secure: crossSite ? true : undefined,
+  });
+}
 
 interface PerUserApp {
   readonly fetch: (request: Request) => Response | Promise<Response>;
@@ -63,6 +94,11 @@ export async function createMultiUserStudioServer(
 
   const app = new Hono<AdminEnv>();
   const userServers = new Map<string, CachedUserServer>();
+
+  app.use("/*", cors({
+    origin: (origin) => origin || "*",
+    credentials: true,
+  }));
 
   async function getOrBuildUserServer(userId: string): Promise<CachedUserServer> {
     const cached = userServers.get(userId);
@@ -124,12 +160,7 @@ export async function createMultiUserStudioServer(
         }
       }
       const session = await createSession(dataRoot, user.id, { ttlMs: SESSION_TTL_MS });
-      setCookie(c, SESSION_COOKIE, session.id, {
-        httpOnly: true,
-        sameSite: "Lax",
-        path: "/",
-        maxAge: Math.floor(SESSION_TTL_MS / 1000),
-      });
+      setCookie(c, SESSION_COOKIE, session.id, sessionCookieOptions(c));
       return c.json({ user: publicUser(await findUserById(dataRoot, user.id) ?? user) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "注册失败";
@@ -154,12 +185,7 @@ export async function createMultiUserStudioServer(
       return c.json({ error: { code: "INVALID_CREDENTIALS", message: "用户名或密码错误" } }, 401);
     }
     const session = await createSession(dataRoot, user.id, { ttlMs: SESSION_TTL_MS });
-    setCookie(c, SESSION_COOKIE, session.id, {
-      httpOnly: true,
-      sameSite: "Lax",
-      path: "/",
-      maxAge: Math.floor(SESSION_TTL_MS / 1000),
-    });
+    setCookie(c, SESSION_COOKIE, session.id, sessionCookieOptions(c));
     return c.json({ user: publicUser(user) });
   });
 
@@ -168,7 +194,7 @@ export async function createMultiUserStudioServer(
     if (sid) {
       await deleteSession(dataRoot, sid);
     }
-    deleteCookie(c, SESSION_COOKIE, { path: "/" });
+    clearSessionCookie(c);
     return c.json({ ok: true });
   });
 
@@ -193,13 +219,13 @@ export async function createMultiUserStudioServer(
     }
     const session = await findSession(dataRoot, sid);
     if (!session) {
-      deleteCookie(c, SESSION_COOKIE, { path: "/" });
+      clearSessionCookie(c);
       return c.json({ error: { code: "UNAUTHENTICATED", message: "会话已过期" } }, 401);
     }
     const user = await findUserById(dataRoot, session.userId);
     if (!user) {
       await deleteSession(dataRoot, sid);
-      deleteCookie(c, SESSION_COOKIE, { path: "/" });
+      clearSessionCookie(c);
       return c.json({ error: { code: "UNAUTHENTICATED", message: "用户不存在" } }, 401);
     }
     if (path.startsWith("/api/v1/admin/")) {

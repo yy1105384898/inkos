@@ -61,7 +61,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const [detectedModel, setDetectedModel] = useState<string>("");
   const [detectedConfig, setDetectedConfig] = useState<DetectedConfig | null>(null);
   const [verifiedProbe, setVerifiedProbe] = useState<VerifiedProbe | null>(null);
-  const [storageScope, setStorageScope] = useState<"browser" | "shared">("browser");
+  const [storageScope, setStorageScope] = useState<"browser" | "shared">("shared");
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
@@ -319,13 +319,13 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
               onClick={() => setStorageScope("shared")}
               className={`rounded-md px-3 py-1.5 text-xs transition-colors ${storageScope === "shared" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
             >
-              服务器共享
+              当前用户
             </button>
           </div>
           <p className="text-xs text-muted-foreground/60">
             {storageScope === "browser"
               ? "Key 只保存在当前浏览器，不写入项目或服务器。"
-              : "共享模式会让访问该工作台的人使用同一配置。"}
+              : "Key 保存到当前登录用户，同账号手机端和网页端可共用。"}
           </p>
         </div>
 
@@ -368,7 +368,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
           <button onClick={handleSave} disabled={isBusy}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50">
             {status.state === "saving" && <Loader2 size={12} className="animate-spin" />}
-            {storageScope === "browser" ? "保存到此浏览器" : "保存到服务器"}
+            {storageScope === "browser" ? "保存到此浏览器" : "保存到当前用户"}
           </button>
           {(isConnected || isCustom) && (
             <button onClick={handleDelete} disabled={isBusy}

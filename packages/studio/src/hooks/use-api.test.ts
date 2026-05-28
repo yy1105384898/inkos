@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildApiUrl, deriveInvalidationPaths, fetchJson } from "./use-api";
+import { DEFAULT_ANDROID_API_BASE_URL, normalizeApiBaseUrl } from "../lib/api-base";
 
 describe("buildApiUrl", () => {
   it("returns null for blank paths so callers can skip requests", () => {
@@ -11,6 +12,14 @@ describe("buildApiUrl", () => {
     expect(buildApiUrl("/books")).toBe("/api/v1/books");
     expect(buildApiUrl("books")).toBe("/api/v1/books");
     expect(buildApiUrl("/api/v1/books")).toBe("/api/v1/books");
+  });
+});
+
+describe("normalizeApiBaseUrl", () => {
+  it("normalizes server origins for Android API calls", () => {
+    expect(normalizeApiBaseUrl("example.com/api/v1/")).toBe("https://example.com");
+    expect(normalizeApiBaseUrl("https://example.com/studio/")).toBe("https://example.com/studio");
+    expect(DEFAULT_ANDROID_API_BASE_URL).toBe("https://yybooks.yangyangnj.top");
   });
 });
 

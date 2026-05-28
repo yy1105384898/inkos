@@ -22,6 +22,7 @@ import {
   revokeInvite,
   transferBookOwnership,
 } from "../auth/user-store.js";
+import { createAndPersistBookSession, listBookSessions } from "../interaction/book-session-store.js";
 
 let dataRoot: string;
 
@@ -192,6 +193,28 @@ describe("user-store", () => {
     const bobBook = await readdir(join(userProjectRoot(dataRoot, "bob"), "books"));
     expect(bobBook).toContain("demo");
     await expect(readdir(aliceBookDir)).rejects.toThrow();
+  });
+
+  it("transferBookOwnership moves only sessions bound to the transferred book", async () => {
+    await createUser(dataRoot, { username: "alice", password: "hunter22" });
+    await createUser(dataRoot, { username: "bob", password: "hunter22" });
+    const aliceRoot = userProjectRoot(dataRoot, "alice");
+    const bobRoot = userProjectRoot(dataRoot, "bob");
+    const aliceBookDir = join(aliceRoot, "books", "demo");
+    await mkdir(aliceBookDir, { recursive: true });
+    await writeFile(join(aliceBookDir, "book.json"), "{}");
+
+    await createAndPersistBookSession(aliceRoot, "demo", "demo-session");
+    await createAndPersistBookSession(aliceRoot, "other-book", "other-session");
+    await createAndPersistBookSession(aliceRoot, null, "orphan-session");
+
+    await transferBookOwnership(dataRoot, "alice", "bob", "demo");
+
+    expect((await listBookSessions(bobRoot, "demo")).map((s) => s.sessionId)).toEqual(["demo-session"]);
+    expect(await listBookSessions(aliceRoot, "demo")).toEqual([]);
+    expect((await listBookSessions(aliceRoot, "other-book")).map((s) => s.sessionId)).toEqual(["other-session"]);
+    expect((await listBookSessions(aliceRoot, null)).map((s) => s.sessionId)).toEqual(["orphan-session"]);
+    expect(await listBookSessions(bobRoot, null)).toEqual([]);
   });
 
   it("transferBookOwnership accepts Chinese book ids", async () => {

@@ -29,8 +29,12 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
         .filter((service) => !service.service.startsWith("custom:"))
         .map((service) => ({
           ...service,
-          connected: browserById.has(service.service),
-          ...(browserById.has(service.service) ? { scope: "browser" as const } : {}),
+          connected: service.connected || browserById.has(service.service),
+          ...(browserById.has(service.service)
+            ? { scope: "browser" as const }
+            : service.connected
+              ? { scope: "server" as const }
+              : {}),
         }));
       for (const browser of browserServices.filter((service) => service.service.startsWith("custom:"))) {
         services.push({
@@ -90,21 +94,18 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
     set((s) => ({ liveModelsLoading: { ...s.liveModelsLoading, [service]: true } }));
     try {
       const local = findBrowserService(service);
-      if (!local) {
-        set((s) => ({
-          modelsByService: { ...s.modelsByService, [service]: [] },
-          liveModelsLoading: { ...s.liveModelsLoading, [service]: false },
-        }));
-        return;
-      }
-      const data = await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
-        "/browser-services/models",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(local),
-        },
-      );
+      const data = local
+        ? await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
+          "/browser-services/models",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(local),
+          },
+        )
+        : await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
+          `/services/${encodeURIComponent(service)}/models`,
+        );
       set((s) => ({
         modelsByService: { ...s.modelsByService, [service]: data.models ?? [] },
         liveModelsLoading: { ...s.liveModelsLoading, [service]: false },

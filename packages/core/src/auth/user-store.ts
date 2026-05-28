@@ -3,6 +3,8 @@ import { randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { isSafeBookId } from "../utils/book-id.js";
+import { loadBookSession } from "../interaction/book-session-store.js";
+import { legacyBookSessionPath, sessionsDir, transcriptPath } from "../interaction/session-transcript.js";
 
 const scrypt = promisify(scryptCb) as (
   password: string | Buffer,
@@ -486,6 +488,58 @@ export async function transferBookOwnership(
     if (error instanceof Error && error.message.startsWith("目标用户")) throw error;
     // 期望的"不存在"分支
   }
+  const sessionIds = await listOwnedBookSessionIds(fromRoot, bookId);
+  for (const sessionId of sessionIds) {
+    await assertSessionMoveTargetClear(toRoot, sessionId);
+  }
+
   await mkdir(join(toRoot, "books"), { recursive: true });
   await rename(fromBook, toBook);
+  await moveBookSessions(fromRoot, toRoot, sessionIds);
+}
+
+async function listOwnedBookSessionIds(projectRoot: string, bookId: string): Promise<string[]> {
+  let files: string[];
+  try {
+    files = await readdir(sessionsDir(projectRoot));
+  } catch {
+    return [];
+  }
+
+  const ids = new Set<string>();
+  for (const file of files) {
+    if (file.endsWith(".jsonl")) ids.add(file.slice(0, -".jsonl".length));
+    if (file.endsWith(".json")) ids.add(file.slice(0, -".json".length));
+  }
+
+  const matched: string[] = [];
+  for (const sessionId of ids) {
+    const session = await loadBookSession(projectRoot, sessionId).catch(() => null);
+    if (session?.bookId === bookId) matched.push(sessionId);
+  }
+  return matched;
+}
+
+async function assertSessionMoveTargetClear(projectRoot: string, sessionId: string): Promise<void> {
+  for (const path of [transcriptPath(projectRoot, sessionId), legacyBookSessionPath(projectRoot, sessionId)]) {
+    try {
+      await stat(path);
+      throw new Error(`Target user already has session: ${sessionId}`);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Target user already has session")) {
+        throw error;
+      }
+    }
+  }
+}
+
+async function moveBookSessions(fromRoot: string, toRoot: string, sessionIds: ReadonlyArray<string>): Promise<void> {
+  if (sessionIds.length === 0) return;
+  await mkdir(sessionsDir(toRoot), { recursive: true });
+  for (const sessionId of sessionIds) {
+    await Promise.all([
+      rename(transcriptPath(fromRoot, sessionId), transcriptPath(toRoot, sessionId)).catch(() => undefined),
+      rename(legacyBookSessionPath(fromRoot, sessionId), legacyBookSessionPath(toRoot, sessionId)).catch(() => undefined),
+    ]);
+  }
 }

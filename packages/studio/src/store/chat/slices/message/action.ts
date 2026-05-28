@@ -6,7 +6,7 @@ import type {
   SessionResponse,
   SessionSummary,
 } from "../../types";
-import { fetchJson } from "../../../../hooks/use-api";
+import { buildApiUrl, fetchJson } from "../../../../hooks/use-api";
 import { getBrowserLlmOverride, setBrowserServiceSelection } from "../../../../lib/browser-service-config";
 import { attachSessionStreamListeners } from "./stream-events";
 import {
@@ -98,6 +98,11 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
   setSelectedModel: (model, service) => {
     setBrowserServiceSelection({ model, service });
+    void fetchJson("/services/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service, defaultModel: model }),
+    }).catch(() => {});
     set({ selectedModel: model, selectedService: service });
   },
 
@@ -338,7 +343,9 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
     get().addUserMessage(sessionId, trimmed);
     session.stream?.close();
-    const streamEs = new EventSource("/api/v1/events");
+    const streamUrl = buildApiUrl("/events");
+    if (!streamUrl) return;
+    const streamEs = new EventSource(streamUrl, { withCredentials: true });
     set((state) => ({
       sessions: updateSession(state.sessions, sessionId, () => ({ stream: streamEs })),
     }));

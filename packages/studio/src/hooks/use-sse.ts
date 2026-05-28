@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { buildApiUrl } from "../lib/api-base";
 
 export interface SSEMessage {
   readonly event: string;
@@ -61,7 +62,9 @@ export function useSSE(url = "/api/v1/events") {
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    const es = new EventSource(url);
+    const eventUrl = buildApiUrl(url);
+    if (!eventUrl) return;
+    const es = new EventSource(eventUrl, { withCredentials: true });
     esRef.current = es;
 
     es.onopen = () => setConnected(true);

@@ -1,4 +1,4 @@
-import { fetchJson, useApi, postApi } from "../hooks/use-api";
+import { buildApiUrl, fetchJson, useApi, postApi } from "../hooks/use-api";
 import { withBrowserLlmOverride } from "../lib/browser-service-config";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useServiceStore } from "../store/service";
@@ -96,7 +96,7 @@ function BookMenu({ bookId, bookTitle, nav, t, onDelete, onOpenChange }: {
             {t("book.settings")}
           </button>
           <a
-            href={`/api/v1/books/${bookId}/export?format=txt`}
+            href={buildApiUrl(`/books/${bookId}/export?format=txt`) ?? "#"}
             download
             onClick={() => setOpen(false)}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-foreground hover:bg-secondary/50 transition-colors cursor-pointer"

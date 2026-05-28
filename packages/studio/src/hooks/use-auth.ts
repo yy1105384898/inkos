@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { buildApiUrl } from "../lib/api-base";
+import { apiFetch, clearNativeApiCookies } from "../lib/api-client";
+import { syncBrowserServiceConfigsToServer } from "../lib/server-service-config";
 
 export interface AuthUser {
   readonly id: string;
@@ -22,17 +25,19 @@ export interface AuthState {
 }
 
 async function postAuth<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api/v1/auth/${path}`, {
+  const url = buildApiUrl(`/auth/${path}`);
+  if (!url) throw new Error("API path is required");
+  const res = await apiFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify(body),
   });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
-      const json = await res.json() as { error?: { message?: string } };
-      if (json?.error?.message) message = json.error.message;
+      const json = await res.json() as { error?: string | { message?: string } };
+      if (typeof json?.error === "string") message = json.error;
+      if (json?.error && typeof json.error === "object" && json.error.message) message = json.error.message;
     } catch {
       // ignore
     }
@@ -45,11 +50,17 @@ export function useAuth(): AuthState {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncedUserId, setSyncedUserId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/auth/me", { credentials: "include" });
+      const url = buildApiUrl("/auth/me");
+      if (!url) {
+        setUser(null);
+        return;
+      }
+      const res = await apiFetch(url);
       if (!res.ok) {
         setUser(null);
         return;
@@ -68,6 +79,12 @@ export function useAuth(): AuthState {
   }, [refresh]);
 
   useEffect(() => {
+    if (!user || syncedUserId === user.id) return;
+    setSyncedUserId(user.id);
+    void syncBrowserServiceConfigsToServer().catch(() => {});
+  }, [syncedUserId, user]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const handler = () => {
       setUser(null);
@@ -81,6 +98,8 @@ export function useAuth(): AuthState {
     try {
       const json = await postAuth<{ user: AuthUser }>("login", { username, password });
       setUser(json.user);
+      setSyncedUserId(json.user.id);
+      await syncBrowserServiceConfigsToServer().catch(() => {});
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -93,6 +112,8 @@ export function useAuth(): AuthState {
     try {
       const json = await postAuth<{ user: AuthUser }>("register", { username, password, invite });
       setUser(json.user);
+      setSyncedUserId(json.user.id);
+      await syncBrowserServiceConfigsToServer().catch(() => {});
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -102,9 +123,14 @@ export function useAuth(): AuthState {
 
   const logout = useCallback(async () => {
     try {
-      await fetch("/api/v1/auth/logout", { method: "POST", credentials: "include" });
+      const url = buildApiUrl("/auth/logout");
+      if (url) {
+        await apiFetch(url, { method: "POST" });
+      }
     } finally {
+      clearNativeApiCookies();
       setUser(null);
+      setSyncedUserId(null);
     }
   }, []);
 

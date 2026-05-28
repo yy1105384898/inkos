@@ -1,4 +1,4 @@
-import { fetchJson, useApi, postApi } from "../hooks/use-api";
+import { buildApiUrl, fetchJson, useApi, postApi } from "../hooks/use-api";
 import { withBrowserLlmOverride } from "../lib/browser-service-config";
 import { useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
@@ -162,7 +162,9 @@ export function BookDetail({
     setConfirmDeleteOpen(false);
     setDeleting(true);
     try {
-      const res = await fetch(`/api/v1/books/${bookId}`, { method: "DELETE" });
+      const url = buildApiUrl(`/books/${bookId}`);
+      if (!url) throw new Error("API path is required");
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         throw new Error((json as { error?: string }).error ?? `${res.status}`);
@@ -300,7 +302,7 @@ export function BookDetail({
   const currentTargetChapters = settingsTargetChapters ?? book.targetChapters ?? 0;
   const currentStatus = settingsStatus ?? (book.status as BookStatus);
 
-  const exportHref = `/api/v1/books/${bookId}/export?format=${exportFormat}${exportApprovedOnly ? "&approvedOnly=true" : ""}`;
+  const exportHref = buildApiUrl(`/books/${bookId}/export?format=${exportFormat}${exportApprovedOnly ? "&approvedOnly=true" : ""}`) ?? "#";
 
   return (
     <div className="space-y-8 fade-in">

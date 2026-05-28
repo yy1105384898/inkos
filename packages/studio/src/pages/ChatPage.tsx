@@ -3,6 +3,7 @@ import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
 import { getBrowserServiceSelection } from "../lib/browser-service-config";
+import { getServerServiceSelection } from "../lib/server-service-config";
 import { chatSelectors, useChatStore } from "../store/chat";
 import { useServiceStore } from "../store/service";
 import {
@@ -114,9 +115,19 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     }
   }, [connectedServices, fetchLiveModels]);
   useEffect(() => {
-    const selected = getBrowserServiceSelection();
-    setConfiguredModelSelection(selected);
-    setServiceConfigLoaded(true);
+    let cancelled = false;
+    void (async () => {
+      let selected: ChatPageModelPreference | null = null;
+      try {
+        selected = await getServerServiceSelection();
+      } catch {
+        // Fall back to the current device selection when the server has none or is unavailable.
+      }
+      if (cancelled) return;
+      setConfiguredModelSelection(selected ?? getBrowserServiceSelection());
+      setServiceConfigLoaded(true);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const modelPickerStatus = useMemo(() => {
