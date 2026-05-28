@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import type { AuthState } from "../hooks/use-auth";
-import { getInitialApiBaseUrl, normalizeApiBaseUrl, setApiBaseUrl } from "../lib/api-base";
+import { DEFAULT_ANDROID_API_BASE_URL, setApiBaseUrl } from "../lib/api-base";
 
 interface LoginPageProps {
   readonly auth: AuthState;
@@ -15,11 +15,7 @@ const loginCopy = {
     username: "用户名",
     password: "密码",
     invite: "邀请码（首位用户可留空）",
-    server: "服务器地址",
-    serverHint: "已内置服务器地址，可按需修改。",
-    serverPlaceholder: "https://yybooks.yangyangnj.top",
     required: "用户名和密码不能为空",
-    invalidServer: "服务器地址无效",
     submitting: "处理中...",
     login: "登录",
     register: "注册",
@@ -32,11 +28,7 @@ const loginCopy = {
     username: "Username",
     password: "Password",
     invite: "Invite code (optional for the first user)",
-    server: "Server URL",
-    serverHint: "Server URL is built in. You can edit it if needed.",
-    serverPlaceholder: "https://yybooks.yangyangnj.top",
     required: "Username and password are required",
-    invalidServer: "Invalid server URL",
     submitting: "Working...",
     login: "Sign in",
     register: "Register",
@@ -58,7 +50,6 @@ export function LoginPage({ auth }: LoginPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [invite, setInvite] = useState("");
-  const [serverUrl, setServerUrl] = useState(() => getInitialApiBaseUrl());
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -72,15 +63,7 @@ export function LoginPage({ auth }: LoginPageProps) {
       return;
     }
 
-    let normalizedServerUrl = "";
-    try {
-      normalizedServerUrl = normalizeApiBaseUrl(serverUrl);
-      setApiBaseUrl(normalizedServerUrl);
-      setServerUrl(normalizedServerUrl);
-    } catch {
-      setLocalError(copy.invalidServer);
-      return;
-    }
+    setApiBaseUrl(DEFAULT_ANDROID_API_BASE_URL);
 
     setSubmitting(true);
     try {
@@ -128,23 +111,6 @@ export function LoginPage({ auth }: LoginPageProps) {
           </div>
         </div>
         <form className="space-y-4" onSubmit={handleSubmit}>
-          <div className="space-y-1">
-            <label className="text-xs uppercase tracking-wide text-muted-foreground" htmlFor="serverUrl">
-              {copy.server}
-            </label>
-            <input
-              id="serverUrl"
-              type="url"
-              inputMode="url"
-              autoComplete="url"
-              placeholder={copy.serverPlaceholder}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              disabled={submitting}
-            />
-            <p className="text-[11px] leading-4 text-muted-foreground">{copy.serverHint}</p>
-          </div>
           <div className="space-y-1">
             <label className="text-xs uppercase tracking-wide text-muted-foreground" htmlFor="username">
               {copy.username}

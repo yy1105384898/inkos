@@ -485,7 +485,7 @@ function ModelPickerContent({
               return (
                 <DropdownMenuItem
                   key={`${group.service}:${m.id}`}
-                  onSelect={() => onSelect(m.id, group.service)}
+                  onClick={() => onSelect(m.id, group.service)}
                   className={`min-h-10 cursor-pointer touch-manipulation ${isSelected ? "bg-muted/50" : ""}`}
                 >
                   <div className="flex flex-1 items-center justify-between">
@@ -504,7 +504,7 @@ function ModelPickerContent({
         )}
       </div>
       <div className="border-t border-border/30">
-        <DropdownMenuItem onSelect={onManage} className="min-h-10 cursor-pointer touch-manipulation text-primary">
+        <DropdownMenuItem onClick={onManage} className="min-h-10 cursor-pointer touch-manipulation text-primary">
           管理服务商
         </DropdownMenuItem>
       </div>
