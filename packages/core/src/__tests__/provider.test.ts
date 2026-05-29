@@ -219,6 +219,18 @@ describe("chatCompletion via pi-ai", () => {
     expect(mockStreamSimple).toHaveBeenCalledTimes(2);
   });
 
+  it("retries transient upstream 502 gateway errors before failing the chapter pipeline", async () => {
+    mockStreamSimple
+      .mockReturnValueOnce(makeErrorStream("502 <html><title>502 Bad Gateway</title></html>"))
+      .mockReturnValueOnce(makeTextStream("recovered after gateway error"));
+
+    const client = makeClient();
+    const result = await chatCompletion(client, "test-model", [{ role: "user", content: "ping" }]);
+
+    expect(result.content).toBe("recovered after gateway error");
+    expect(mockStreamSimple).toHaveBeenCalledTimes(2);
+  });
+
   it("passes temperature and maxTokens to streamSimple", async () => {
     mockStreamSimple.mockReturnValue(makeTextStream("ok"));
 

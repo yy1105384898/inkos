@@ -454,6 +454,12 @@ function collectErrorText(error: unknown, depth = 0): string {
 function isTransientLLMTransportError(error: unknown): boolean {
   const text = collectErrorText(error);
   return [
+    "502",
+    "503",
+    "504",
+    "Bad Gateway",
+    "Service Unavailable",
+    "Gateway Timeout",
     "terminated",
     "UND_ERR_SOCKET",
     "ECONNRESET",
