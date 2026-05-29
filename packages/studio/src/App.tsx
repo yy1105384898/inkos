@@ -21,22 +21,19 @@ import { LanguageSelector } from "./pages/LanguageSelector";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminPanel } from "./pages/AdminPanel";
 import { BookSidebar, BookSidebarToggle } from "./components/chat/BookSidebar";
+import { MobileBottomNav } from "./components/mobile/MobileBottomNav";
 import { useSSE } from "./hooks/use-sse";
 import { useSessionEvents } from "./hooks/use-session-events";
 import { useTheme } from "./hooks/use-theme";
 import { useI18n } from "./hooks/use-i18n";
 import { useAuth } from "./hooks/use-auth";
 import { postApi, putApi, useApi } from "./hooks/use-api";
+import { isNativeMobileShell } from "./lib/mobile-shell";
 import {
   Sun,
   Moon,
   LogOut,
   House,
-  Library,
-  SquarePen,
-  MessageSquareText,
-  Wrench,
-  Settings,
 } from "lucide-react";
 
 export type { HashRoute as Route } from "./hooks/use-hash-route";
@@ -113,6 +110,7 @@ export function App() {
       : route.page === "service-detail"
         ? "services"
         : route.page;
+  const useMobileShell = isNativeMobileShell();
 
   if (auth.loading) {
     return (
@@ -147,16 +145,16 @@ export function App() {
   }
 
   return (
-    <div className="h-screen bg-background text-foreground flex overflow-hidden font-sans">
+    <div className={`h-screen bg-background text-foreground flex overflow-hidden font-sans ${useMobileShell ? "native-mobile-shell" : "web-studio-shell"}`}>
       {/* Left Sidebar */}
-      <div className="hidden h-full shrink-0 md:flex">
+      <div className={useMobileShell ? "hidden h-full shrink-0 md:flex" : "flex h-full shrink-0"}>
         <Sidebar nav={nav} activePage={activePage} sse={sse} t={t} />
       </div>
 
       {/* Center Content */}
       <div className="flex-1 flex flex-col min-w-0 bg-background/30 backdrop-blur-sm">
         {/* Header Strip */}
-        <header className="hidden h-14 shrink-0 items-center justify-between px-8 border-b border-border/40 md:flex">
+        <header className={useMobileShell ? "hidden h-14 shrink-0 items-center justify-between px-8 border-b border-border/40 md:flex" : "flex h-14 shrink-0 items-center justify-between px-8 border-b border-border/40"}>
           <div className="flex items-center gap-2">
              <button
                onClick={nav.toDashboard}
@@ -334,83 +332,9 @@ export function App() {
             </div>
           )}
         </main>
-        <MobileBottomNav nav={nav} activePage={activePage} lang={currentLang} />
+        {useMobileShell && <MobileBottomNav nav={nav} activePage={activePage} lang={currentLang} />}
       </div>
     </div>
   );
 }
 
-function MobileBottomNav({
-  nav,
-  activePage,
-  lang,
-}: {
-  nav: {
-    toDashboard: () => void;
-    toBookCreate: () => void;
-    toChat: () => void;
-    toStyle: () => void;
-    toServices: () => void;
-  };
-  activePage: string;
-  lang: string;
-}) {
-  const isZh = lang !== "en";
-  const items = [
-    {
-      key: "dashboard",
-      label: isZh ? "书架" : "Books",
-      icon: Library,
-      active: activePage === "dashboard",
-      onClick: nav.toDashboard,
-    },
-    {
-      key: "create",
-      label: isZh ? "新建" : "Create",
-      icon: SquarePen,
-      active: activePage === "book-create",
-      onClick: nav.toBookCreate,
-      primary: true,
-    },
-    {
-      key: "chapter",
-      label: isZh ? "创作" : "Write",
-      icon: MessageSquareText,
-      active: activePage === "chat" || activePage.startsWith("book:"),
-      onClick: nav.toChat,
-    },
-    {
-      key: "tools",
-      label: isZh ? "工具" : "Tools",
-      icon: Wrench,
-      active: ["style", "import", "radar", "doctor", "genres"].includes(activePage),
-      onClick: nav.toStyle,
-    },
-    {
-      key: "settings",
-      label: isZh ? "设置" : "Settings",
-      icon: Settings,
-      active: activePage === "services" || activePage === "service-detail",
-      onClick: nav.toServices,
-    },
-  ];
-
-  return (
-    <nav className="mobile-bottom-nav md:hidden" aria-label={isZh ? "底部导航" : "Bottom navigation"}>
-      {items.map((item) => {
-        const Icon = item.icon;
-        return (
-          <button
-            key={item.key}
-            type="button"
-            onClick={item.onClick}
-            className={`mobile-bottom-nav__item ${item.active ? "is-active" : ""} ${item.primary ? "is-primary" : ""}`}
-          >
-            <Icon size={20} strokeWidth={2} />
-            <span>{item.label}</span>
-          </button>
-        );
-      })}
-    </nav>
-  );
-}
