@@ -34,7 +34,14 @@ export type OnStreamProgress = (progress: StreamProgress) => void;
 
 const INKOS_USER_AGENT = "InkOS/1.3.5";
 const UNKNOWN_MODEL_FALLBACK_MAX_TOKENS = 8192 * 3;
-const TRANSIENT_LLM_RETRIES = 2;
+const TRANSIENT_LLM_RETRIES = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRIES", 6);
+const TRANSIENT_LLM_RETRY_BASE_DELAY_MS = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRY_BASE_DELAY_MS", 1_500);
+const TRANSIENT_LLM_RETRY_MAX_DELAY_MS = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRY_MAX_DELAY_MS", 12_000);
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function isByteString(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
@@ -471,6 +478,20 @@ function isTransientLLMTransportError(error: unknown): boolean {
   ].some((needle) => text.includes(needle));
 }
 
+function transientRetryDelayMs(attempt: number): number {
+  if (process.env.VITEST) return 0;
+  if (TRANSIENT_LLM_RETRY_BASE_DELAY_MS <= 0) return 0;
+  return Math.min(
+    TRANSIENT_LLM_RETRY_BASE_DELAY_MS * (2 ** attempt),
+    TRANSIENT_LLM_RETRY_MAX_DELAY_MS,
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function withTransientLLMRetry<T>(
   run: () => Promise<T>,
   options?: { readonly enabled?: boolean },
@@ -490,6 +511,7 @@ async function withTransientLLMRetry<T>(
       ) {
         throw error;
       }
+      await sleep(transientRetryDelayMs(attempt));
     }
   }
   throw lastError;
