@@ -21,6 +21,8 @@ import { ChatMessage } from "../components/chat/ChatMessage";
 import { QuickActions } from "../components/chat/QuickActions";
 import { ToolExecutionSteps, type ProposedActionDetails } from "../components/chat/ToolExecutionSteps";
 import { PlayHud } from "../components/chat/PlayHud";
+import { PlayChoicePanel } from "../components/chat/PlayChoicePanel";
+import { latestPlayChoices } from "../components/chat/play-choices";
 import {
   Loader2,
   BotMessageSquare,
@@ -93,6 +95,8 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const hasBook = Boolean(activeBookId);
   const currentSessionKind: ChatSessionKind = activeSession?.sessionKind
     ?? (mode === "book-create" ? "book-create" : activeBookId ? "book" : "chat");
+  const isGuidedPlay = currentSessionKind === "play" && activeSession?.playMode === "guided";
+  const playChoices = useMemo(() => (isGuidedPlay ? latestPlayChoices(messages) : []), [isGuidedPlay, messages]);
 
   // Derived: is the assistant currently streaming/thinking/executing tools?
   const isStreaming = useMemo(() => {
@@ -443,7 +447,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       </div>
 
       {/* Quick actions (only when a book is active) */}
-      {hasBook && (
+      {hasBook && !isGuidedPlay && (
         <div className="shrink-0 max-w-3xl mx-auto w-full px-4">
           <QuickActions
             onAction={handleQuickAction}
@@ -453,7 +457,17 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
         </div>
       )}
 
-      {/* Input area */}
+      {/* Input area — guided play swaps the free-text input for a choice panel */}
+      {isGuidedPlay ? (
+        <PlayChoicePanel
+          choices={playChoices}
+          disabled={loading || !activeSessionId}
+          isZh={isZh}
+          onChoose={(action) => {
+            if (activeSessionId) void sendMessage(activeSessionId, action, { activeBookId, sessionKind: "play", actionSource: "button" });
+          }}
+        />
+      ) : (
       <div className="shrink-0 border-t border-border/40 px-4 py-3">
         <div className="max-w-3xl mx-auto">
             <div className="rounded-xl bg-secondary/30 transition-all">
@@ -508,6 +522,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
             </div>
         </div>
       </div>
+      )}
 
       {currentSessionKind === "play" && activeSessionId && (
         <PlayHud

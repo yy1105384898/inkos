@@ -210,9 +210,9 @@ export function Sidebar({ nav, activePage, sse, t }: {
     nav.toBookCreate();
   };
 
-  const launchProjectMode = (kind: "short" | "play") => {
+  const launchProjectMode = (kind: "short" | "play", playMode?: "open" | "guided") => {
     setProjectChatExpanded(true);
-    const sessionId = createDraftSession(null, kind);
+    const sessionId = createDraftSession(null, kind, playMode);
     setProjectChatSessionId(sessionId);
     setInput("");
     nav.toChat();
@@ -285,12 +285,21 @@ export function Sidebar({ nav, activePage, sse, t }: {
             </button>
             <button
               type="button"
-              onClick={() => launchProjectMode("play")}
+              onClick={() => launchProjectMode("play", "guided")}
               className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-all hover:bg-secondary/50 hover:text-foreground"
             >
               <Gamepad2 size={16} className="text-muted-foreground" />
-              <span className="flex-1">InkOS Play</span>
-              <span className="text-[10px] text-muted-foreground/60">互动</span>
+              <span className="flex-1">InkOS Play · 点着玩</span>
+              <span className="text-[10px] text-muted-foreground/60">选项</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => launchProjectMode("play", "open")}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-muted-foreground transition-all hover:bg-secondary/50 hover:text-foreground"
+            >
+              <Gamepad2 size={16} className="text-muted-foreground" />
+              <span className="flex-1">InkOS Play · 自由玩</span>
+              <span className="text-[10px] text-muted-foreground/60">自由</span>
             </button>
           </div>
 
