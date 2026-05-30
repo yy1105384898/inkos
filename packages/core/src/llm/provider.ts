@@ -1220,7 +1220,7 @@ async function chatCompletionViaPiAi(
     headers: mergeUserAgent(piModel.headers),
   };
 
-  if (!client.stream) {
+  const completeOnce = async (): Promise<LLMResponse> => {
     const response = await piCompleteSimple(piModel, context, streamOpts);
     if (response.stopReason === "error" && response.errorMessage) {
       throw new Error(response.errorMessage);
@@ -1231,7 +1231,7 @@ async function chatCompletionViaPiAi(
       .join("");
     if (!content) {
       const diag = `usage=${response.usage.input}+${response.usage.output}`;
-      console.warn(`[inkos] LLM 非流式响应无文本内容 (${diag})`);
+      console.warn(`[inkos] LLM non-stream response had no text content (${diag})`);
       throw new Error(`LLM returned empty response (${diag})`);
     }
     return {
@@ -1242,6 +1242,10 @@ async function chatCompletionViaPiAi(
         totalTokens: response.usage.totalTokens,
       },
     };
+  };
+
+  if (!client.stream) {
+    return completeOnce();
   }
 
   const eventStream = piStreamSimple(piModel, context, streamOpts);
@@ -1286,7 +1290,12 @@ async function chatCompletionViaPiAi(
   if (!content) {
     const diag = `usage=${inputTokens}+${outputTokens}`;
     console.warn(`[inkos] LLM 流式响应无文本内容 (${diag})`);
-    throw new Error(`LLM returned empty response from stream (${diag})`);
+    try {
+      return await completeOnce();
+    } catch (fallbackError) {
+      const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      throw new Error(`LLM returned empty response from stream (${diag}); non-stream fallback failed: ${message}`);
+    }
   }
 
   return {
