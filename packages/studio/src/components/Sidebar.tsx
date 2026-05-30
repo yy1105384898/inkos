@@ -6,6 +6,7 @@ import type { TFunction } from "../hooks/use-i18n";
 import { setProjectChatSessionId } from "../pages/chat-page-state";
 import { useChatStore } from "../store/chat";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { PersonalizationDialogButton } from "./PersonalizationDialogButton";
 import {
   Dialog,
   DialogContent,
@@ -487,6 +488,15 @@ export function Sidebar({ nav, activePage, sse, t }: {
                 </div>
               )}
             </div>
+            <PersonalizationDialogButton
+              iconSize={16}
+              className={(hasMemory) => `w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                hasMemory
+                  ? "bg-primary/10 text-primary hover:bg-primary/15"
+                  : "text-foreground hover:text-foreground hover:bg-secondary/50"
+              }`}
+              iconClassName={(hasMemory) => hasMemory ? "text-primary" : "text-muted-foreground group-hover:text-foreground"}
+            />
             <SidebarItem
               label={t("nav.style")}
               icon={<Wand2 size={16} />}
