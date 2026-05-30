@@ -57,6 +57,8 @@ export interface AgentSessionConfig {
   onEvent?: (event: AgentEvent) => void;
   /** Request-scoped cover generation defaults, e.g. browser-local image key. */
   coverGeneration?: CoverGenerationDefaults;
+  /** Saved project-level response and writing constraints. */
+  personalizationMemory?: string;
 }
 
 export interface AgentSessionResult {
@@ -82,6 +84,7 @@ interface CachedAgent {
   apiKey: string | undefined;
   allowSystemFileRead: boolean;
   coverGenerationIdentity: string;
+  personalizationIdentity: string;
   lastCommittedSeq: number;
   lastActive: number;
 }
@@ -533,6 +536,7 @@ async function runAgentSessionUnlocked(
   const requestedModelIdentity = agentModelIdentity(model);
   const allowSystemFileRead = config.allowSystemFileRead ?? envFlagEnabled(process.env.INKOS_AGENT_ALLOW_SYSTEM_READ, false);
   const coverGenerationIdentity = JSON.stringify(config.coverGeneration ?? {});
+  const personalizationIdentity = config.personalizationMemory?.trim() ?? "";
   const cacheKey = agentCacheKey(projectRoot, sessionId);
 
   // ----- Resolve or create Agent -----
@@ -552,6 +556,7 @@ async function runAgentSessionUnlocked(
     const apiKeyChanged = cached.apiKey !== config.apiKey;
     const readPermissionChanged = cached.allowSystemFileRead !== allowSystemFileRead;
     const coverGenerationChanged = cached.coverGenerationIdentity !== coverGenerationIdentity;
+    const personalizationChanged = cached.personalizationIdentity !== personalizationIdentity;
     const transcriptChanged = cached.lastCommittedSeq !== currentCommittedSeq;
 
     if (
@@ -562,6 +567,7 @@ async function runAgentSessionUnlocked(
       apiKeyChanged ||
       readPermissionChanged ||
       coverGenerationChanged ||
+      personalizationChanged ||
       transcriptChanged
     ) {
       agentCache.delete(cacheKey);
@@ -582,7 +588,7 @@ async function runAgentSessionUnlocked(
     const agent = new Agent({
       initialState: {
         model,
-        systemPrompt: buildAgentSystemPrompt(bookId, language),
+        systemPrompt: buildAgentSystemPrompt(bookId, language, config.personalizationMemory),
         tools: createAgentToolsForMode({
           pipeline,
           bookId,
@@ -611,6 +617,7 @@ async function runAgentSessionUnlocked(
       apiKey: config.apiKey,
       allowSystemFileRead,
       coverGenerationIdentity,
+      personalizationIdentity,
       lastCommittedSeq: currentCommittedSeq ?? await latestCommittedSeq(projectRoot, sessionId),
       lastActive: Date.now(),
     };

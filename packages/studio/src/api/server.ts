@@ -214,6 +214,50 @@ function resolveProjectImageFile(root: string, rawPath: string): { readonly reso
   return { resolved, contentType };
 }
 
+const PERSONALIZATION_MAX_CHARS = 4000;
+
+function personalizationPath(root: string): string {
+  return join(root, ".inkos", "studio-personalization.json");
+}
+
+function normalizePersonalizationMemory(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, PERSONALIZATION_MAX_CHARS);
+}
+
+async function loadPersonalizationMemory(root: string): Promise<string> {
+  try {
+    const raw = await readFile(personalizationPath(root), "utf-8");
+    const parsed = JSON.parse(raw) as { memory?: unknown };
+    return normalizePersonalizationMemory(parsed.memory);
+  } catch {
+    return "";
+  }
+}
+
+async function savePersonalizationMemory(root: string, memory: string): Promise<void> {
+  const filePath = personalizationPath(root);
+  await mkdir(join(root, ".inkos"), { recursive: true });
+  await writeFile(filePath, JSON.stringify({
+    memory: normalizePersonalizationMemory(memory),
+    updatedAt: new Date().toISOString(),
+  }, null, 2), "utf-8");
+}
+
+function buildPersonalizationExternalContext(memory: string): string | undefined {
+  const trimmed = memory.trim();
+  if (!trimmed) return undefined;
+  return `## 个性化/模型记忆\n${trimmed}`;
+}
+
+function mergeExternalContext(
+  current: string | undefined,
+  personalization: string | undefined,
+): string | undefined {
+  const parts = [personalization, current].filter((part): part is string => Boolean(part?.trim()));
+  return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
 function isLikelyFailedToolResult(exec: CollectedToolExec): boolean {
   if (exec.status === "error") return true;
   const text = `${exec.error ?? ""}\n${exec.result ?? ""}`.toLowerCase();
@@ -1413,6 +1457,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     },
   ): Promise<PipelineConfig> {
     const currentConfig = overrides?.currentConfig ?? await loadCurrentProjectConfig();
+    const personalizationContext = buildPersonalizationExternalContext(await loadPersonalizationMemory(root));
     const effectiveLlmConfig = buildBrowserLlmConfig(currentConfig, overrides?.llmOverride);
     const scopedSseSink: LogSink = overrides?.sessionIdForSSE
       ? {
@@ -1446,7 +1491,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           chineseChars: progress.chineseChars,
         });
       },
-      externalContext: overrides?.externalContext,
+      externalContext: mergeExternalContext(overrides?.externalContext, personalizationContext),
     };
   }
 
@@ -2420,6 +2465,17 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     });
   });
 
+  app.get("/api/v1/personalization", async (c) => {
+    return c.json({ memory: await loadPersonalizationMemory(root) });
+  });
+
+  app.put("/api/v1/personalization", async (c) => {
+    const body = await c.req.json<{ memory?: unknown }>().catch((): { memory?: unknown } => ({}));
+    const memory = normalizePersonalizationMemory(body.memory);
+    await savePersonalizationMemory(root, memory);
+    return c.json({ ok: true, memory });
+  });
+
   app.get("/api/v1/project/files/:file{.+}", async (c) => {
     const file = resolveProjectImageFile(root, c.req.param("file"));
 
@@ -3012,6 +3068,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           sessionId: bookSession.sessionId,
           language: config.language ?? "zh",
           coverGeneration,
+          personalizationMemory: await loadPersonalizationMemory(root),
           onEvent: (event) => {
             if (event.type === "message_update") {
               const ame = event.assistantMessageEvent;
@@ -3182,7 +3239,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             fallbackClient,
             activeModel,
             [
-              { role: "system", content: buildAgentSystemPrompt(agentBookId, config.language ?? "zh") },
+              { role: "system", content: buildAgentSystemPrompt(agentBookId, config.language ?? "zh", await loadPersonalizationMemory(root)) },
               { role: "user", content: instruction },
             ],
             { maxTokens: 256 },

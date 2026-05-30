@@ -47,6 +47,12 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).toContain("Do NOT use emoji");
     });
 
+    it("injects personalization memory into creation prompt", () => {
+      const prompt = buildAgentSystemPrompt(null, "en", "Answer briefly. Avoid filler.");
+      expect(prompt).toContain("Personalization / Model Memory");
+      expect(prompt).toContain("Answer briefly. Avoid filler.");
+    });
+
     it("no-book prompt does NOT mention read/edit/grep/ls", () => {
       const prompt = buildAgentSystemPrompt(null, "zh");
       expect(prompt).not.toMatch(/\bread\b.*读取/);
@@ -132,6 +138,12 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).toContain("wuxia");
       expect(prompt).toContain("infinite-flow");
       expect(prompt).toContain("system-flow");
+      expect(prompt).toContain("detective");
+      expect(prompt).toContain("court-politics");
+      expect(prompt).toContain("cyberpunk");
+      expect(prompt).toContain("beast-taming");
+      expect(prompt).toContain("quick-transmigration");
+      expect(prompt).toContain("workplace");
     });
 
     it("with-book prompt names Phase 5 canonical truth paths", () => {
@@ -167,6 +179,12 @@ describe("buildAgentSystemPrompt", () => {
     it("English with-book prompt forbids emoji", () => {
       const prompt = buildAgentSystemPrompt("novel", "en");
       expect(prompt).toContain("Do NOT use emoji");
+    });
+
+    it("injects personalization memory into writing prompt", () => {
+      const prompt = buildAgentSystemPrompt("novel", "en", "Prefer fast pacing and concise replies.");
+      expect(prompt).toContain("Personalization / Model Memory");
+      expect(prompt).toContain("Prefer fast pacing and concise replies.");
     });
 
     it("with-book prompt does NOT list architect as available", () => {

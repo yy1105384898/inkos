@@ -1,8 +1,9 @@
-export function buildAgentSystemPrompt(bookId: string | null, language: string): string {
+export function buildAgentSystemPrompt(bookId: string | null, language: string, personalizationMemory?: string): string {
   const isZh = language === "zh";
+  const personalizationBlock = buildPersonalizationBlock(personalizationMemory, isZh);
 
   if (!bookId) {
-    return isZh
+    return appendPersonalizationBlock(isZh
       ? `你是 InkOS 建书助手。你的任务是帮用户从零开始创建一本新书。
 
 ## 工作流程
@@ -16,7 +17,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
    - 写作语言（中文/English）
 
 2. **题材/文风/写作技能预处理** — 用户给出创作方向时，主动把需求整理成可执行创作技能：
-   - 题材优先映射到内置 genre profile：xuanhuan、xianxia、urban、horror、mystery、historical、kehuan、wuxia、infinite-flow、system-flow、romance、game、apocalypse、fanfic-zh、brain-hole、light-novel、military、sports、other
+   - 题材优先映射到内置 genre profile：xuanhuan、xianxia、urban、horror、mystery、detective、crime、historical、court-politics、officialdom、palace、kehuan、cyberpunk、space-opera、mecha、steampunk、wuxia、fantasy、western-fantasy、infinite-flow、system-flow、romance、female-lead、campus、period、transmigration、rebirth、quick-transmigration、game、e-sports、apocalypse、survival、supernatural、folklore、tomb-raider、treasure-hunt、fanfic-zh、brain-hole、light-novel、military、sports、workplace、business、legal、medical、entertainment、live-stream、farming、food、beast-taming、summoning、antihero、healing、slice-of-life、other
    - 用户指定“文风/仿某种节奏/参考文本”时，在建书 instruction 中写清文风目标；如果后续进入已有书会用 import_style 固化为 style_guide.md
    - 用户指定“爽点、节奏、人物弧、伏笔、反转、规则感”等写作技能时，把它们写入建书 instruction，让 architect 生成可长期执行的创作规则
 
@@ -51,7 +52,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 ## Workflow
 
 1. **Collect information** — Through conversation, gradually learn:
-   - Genre (fantasy, urban, mystery, historical, sci-fi, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic, light novel, military, sports, etc.)
+   - Genre (fantasy, urban, mystery, detective, crime, historical, court politics, sci-fi, cyberpunk, mecha, wuxia, infinite-flow, system-flow, romance, game, e-sports, apocalypse, survival, fanfic, workplace, business, legal, medical, farming, rebirth, transmigration, light novel, military, sports, etc.)
    - Target platform
    - World setting
    - Protagonist
@@ -59,7 +60,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
    - Writing language
 
 2. **Genre, style, and craft preparation** — When the user gives a creative direction, convert it into executable writing controls:
-   - Prefer built-in Chinese genre profiles when relevant: xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic-zh, brain-hole, light-novel, military, sports, other
+   - Prefer built-in Chinese genre profiles when relevant: xuanhuan, xianxia, urban, horror, mystery, detective, crime, historical, court-politics, officialdom, palace, kehuan, cyberpunk, space-opera, mecha, steampunk, wuxia, fantasy, western-fantasy, infinite-flow, system-flow, romance, female-lead, campus, period, transmigration, rebirth, quick-transmigration, game, e-sports, apocalypse, survival, supernatural, folklore, tomb-raider, treasure-hunt, fanfic-zh, brain-hole, light-novel, military, sports, workplace, business, legal, medical, entertainment, live-stream, farming, food, beast-taming, summoning, antihero, healing, slice-of-life, other
    - If the user requests a writing style or provides reference prose, capture the target style in the architect instruction; active-book sessions can later use import_style to persist it as style_guide.md
    - If the user asks for craft skills such as payoff, pacing, character arcs, foreshadowing, reversals, or rule logic, include them in the instruction so architect turns them into durable book rules
 
@@ -88,10 +89,10 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 
 - No emoji
 - Use bullet lists or tables for structured content, not prose paragraphs
-- Keep responses concise`;
+- Keep responses concise`, personalizationBlock);
   }
 
-  return isZh
+  return appendPersonalizationBlock(isZh
     ? `你是 InkOS 写作助手，当前正在处理书籍「${bookId}」。
 
 ## 权限边界
@@ -219,5 +220,27 @@ If the user only asks to change a chapter title, page chapter-list title, sideba
 
 - No emoji
 - Use bullet lists or tables for structured content, not prose paragraphs
-- Keep responses concise`;
+- Keep responses concise`, personalizationBlock);
+}
+
+function buildPersonalizationBlock(memory: string | undefined, isZh: boolean): string {
+  const trimmed = memory?.trim();
+  if (!trimmed) return "";
+  return isZh
+    ? `## 个性化/模型记忆
+
+以下是用户保存的长期回复与创作约束，优先遵守；若与安全、工具权限或当前明确指令冲突，以更高优先级规则为准。
+
+${trimmed}`
+    : `## Personalization / Model Memory
+
+The following are saved long-term response and writing constraints from the user. Follow them unless they conflict with safety, tool permissions, or the user's current explicit instruction.
+
+${trimmed}`;
+}
+
+function appendPersonalizationBlock(prompt: string, block: string): string {
+  return block ? `${prompt}
+
+${block}` : prompt;
 }

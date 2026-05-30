@@ -22,10 +22,21 @@ import { ToolExecutionSteps } from "../components/chat/ToolExecutionSteps";
 import {
   BotMessageSquare,
   ArrowUp,
+  Brain,
   ChevronDown,
   Check,
   Square,
 } from "lucide-react";
+import { Button } from "../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Textarea } from "../components/ui/textarea";
 import { Shimmer } from "../components/ai-elements/shimmer";
 import {
   Message,
@@ -41,6 +52,7 @@ import {
   setBookCreateSessionId,
   setProjectChatSessionId,
 } from "./chat-page-state";
+import { fetchJson } from "../hooks/use-api";
 
 // -- Types --
 
@@ -103,6 +115,11 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const fetchLiveModels = useServiceStore((s) => s.fetchLiveModels);
   const [configuredModelSelection, setConfiguredModelSelection] = useState<ChatPageModelPreference | null>(null);
   const [serviceConfigLoaded, setServiceConfigLoaded] = useState(false);
+  const [personalizationOpen, setPersonalizationOpen] = useState(false);
+  const [personalizationMemory, setPersonalizationMemory] = useState("");
+  const [personalizationDraft, setPersonalizationDraft] = useState("");
+  const [personalizationSaving, setPersonalizationSaving] = useState(false);
+  const [personalizationStatus, setPersonalizationStatus] = useState<string | null>(null);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
   const connectedServices = useMemo(
@@ -126,6 +143,22 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       if (cancelled) return;
       setConfiguredModelSelection(selected);
       setServiceConfigLoaded(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchJson<{ memory?: string }>("/personalization");
+        if (cancelled) return;
+        const memory = data.memory ?? "";
+        setPersonalizationMemory(memory);
+        setPersonalizationDraft(memory);
+      } catch {
+        // Personalization is optional.
+      }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -258,6 +291,27 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const onStop = () => {
     if (!activeSessionId) return;
     void stopMessage(activeSessionId);
+  };
+
+  const savePersonalization = async () => {
+    setPersonalizationSaving(true);
+    setPersonalizationStatus(null);
+    try {
+      const data = await fetchJson<{ memory: string }>("/personalization", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memory: personalizationDraft }),
+      });
+      const memory = data.memory ?? "";
+      setPersonalizationMemory(memory);
+      setPersonalizationDraft(memory);
+      setPersonalizationStatus(isZh ? "已保存" : "Saved");
+      setPersonalizationOpen(false);
+    } catch (error) {
+      setPersonalizationStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPersonalizationSaving(false);
+    }
   };
 
   const handleQuickAction = (command: string) => {
@@ -439,10 +493,62 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                     配置模型 →
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPersonalizationDraft(personalizationMemory);
+                    setPersonalizationStatus(null);
+                    setPersonalizationOpen(true);
+                  }}
+                  className={`ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                    personalizationMemory.trim()
+                      ? "bg-primary/10 text-primary hover:bg-primary/15"
+                      : "text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  <Brain size={13} />
+                  个性化
+                </button>
               </div>
             </div>
         </div>
       </div>
+      <Dialog open={personalizationOpen} onOpenChange={setPersonalizationOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>个性化 / 模型记忆</DialogTitle>
+            <DialogDescription>
+              保存后自动注入后续聊天和写作 prompt。
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={personalizationDraft}
+            onChange={(event) => setPersonalizationDraft(event.target.value)}
+            placeholder="例：回答极简，少铺垫，不啰嗦；创作偏好强节奏、强爽点、少解释。"
+            className="min-h-36 resize-y"
+            maxLength={4000}
+          />
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{personalizationStatus ?? "最多 4000 字"}</span>
+            <span>{personalizationDraft.length}/4000</span>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setPersonalizationDraft("");
+                setPersonalizationStatus(null);
+              }}
+            >
+              清空
+            </Button>
+            <Button type="button" onClick={savePersonalization} disabled={personalizationSaving}>
+              {personalizationSaving ? "保存中..." : "保存"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
