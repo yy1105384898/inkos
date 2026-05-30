@@ -13,6 +13,7 @@ import {
   createReadTool,
   createGrepTool,
   createLsTool,
+  createImportStyleTool,
   createWriteTruthFileTool,
   createShortFictionRunTool,
   createGenerateCoverTool,
@@ -489,6 +490,7 @@ function createAgentToolsForMode(params: {
     shortFictionTool,
     generateCoverTool,
     createReadTool(params.projectRoot, { allowSystemPaths: params.allowSystemFileRead }),
+    createImportStyleTool(params.pipeline, params.bookId),
     createWriteTruthFileTool(params.pipeline, params.projectRoot, params.bookId),
     createRenameEntityTool(params.pipeline, params.projectRoot, params.bookId),
     createUpdateChapterTitleTool(params.projectRoot, params.bookId),
@@ -751,4 +753,22 @@ export function evictAgentCache(sessionId: string): boolean {
     deleted = true;
   }
   return deleted;
+}
+
+/** Abort and evict a currently running cached Agent session. */
+export function abortAgentSession(sessionId: string, projectRoot?: string): boolean {
+  let aborted = false;
+  for (const [key, entry] of agentCache) {
+    if (entry.sessionId !== sessionId) continue;
+    if (projectRoot && entry.projectRoot !== projectRoot) continue;
+    const abortable = entry.agent as Agent & {
+      clearAllQueues?: () => void;
+      abort?: () => void;
+    };
+    abortable.clearAllQueues?.();
+    abortable.abort?.();
+    agentCache.delete(key);
+    aborted = true;
+  }
+  return aborted;
 }

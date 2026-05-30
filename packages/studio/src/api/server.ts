@@ -22,6 +22,7 @@ import {
   migrateBookSession,
   SessionAlreadyMigratedError,
   runAgentSession,
+  abortAgentSession,
   buildAgentSystemPrompt,
   resolveServicePreset,
   resolveServiceProviderFamily,
@@ -560,6 +561,11 @@ interface StudioBrowserCoverOverride {
   readonly apiKey: string;
 }
 
+interface RadarModelRequest {
+  readonly service?: string;
+  readonly model?: string;
+}
+
 function normalizeBrowserLlmOverride(value: unknown): StudioBrowserLlmOverride | undefined {
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
@@ -592,6 +598,21 @@ function normalizeBrowserLlmOverride(value: unknown): StudioBrowserLlmOverride |
     ...(stream !== undefined ? { stream } : {}),
     ...(temperature !== undefined ? { temperature } : {}),
   };
+}
+
+function normalizeRadarModelRequest(raw: unknown): RadarModelRequest {
+  if (!raw || typeof raw !== "object") return {};
+  const body = raw as Record<string, unknown>;
+  const service = typeof body.service === "string" ? body.service.trim() : "";
+  const model = typeof body.model === "string" ? body.model.trim() : "";
+  if (!service && !model) return {};
+  if (!service || !model) {
+    throw new ApiError(400, "INVALID_RADAR_MODEL", "Radar scan requires both service and model.");
+  }
+  if (!isTextChatModelId(model)) {
+    throw new ApiError(400, "INVALID_RADAR_MODEL", nonTextModelMessage(model));
+  }
+  return { service, model };
 }
 
 function buildBrowserLlmConfig(
@@ -1320,6 +1341,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   const app = new Hono();
   const state = new StateManager(root);
   let cachedConfig = initialConfig;
+  const stoppedAgentSessions = new Set<string>();
 
   app.use("/*", cors({
     origin: (origin) => origin || "*",
@@ -1426,6 +1448,75 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       },
       externalContext: overrides?.externalContext,
     };
+  }
+
+  async function buildServiceModelPipelineConfig(
+    currentConfig: ProjectConfig,
+    service: string,
+    model: string,
+  ): Promise<PipelineConfig> {
+    const configuredEntry = await resolveConfiguredServiceEntry(root, service);
+    let resolved: Awaited<ReturnType<typeof resolveServiceModel>>;
+    try {
+      resolved = await resolveServiceModel(
+        service,
+        model,
+        root,
+        await resolveConfiguredServiceBaseUrl(root, service),
+        configuredEntry?.apiFormat,
+      );
+    } catch (e: any) {
+      const message = e?.message ?? String(e);
+      if (/API key/i.test(message)) {
+        throw new ApiError(400, "LLM_CONFIG_ERROR", `Please configure an API key for ${service} first.`);
+      }
+      throw e;
+    }
+
+    const client = createLLMClient({
+      ...currentConfig.llm,
+      service: configuredEntry?.service ?? service,
+      model,
+      apiKey: resolved.apiKey ?? "",
+      baseUrl: configuredEntry?.baseUrl ?? "",
+      ...(configuredEntry?.apiFormat ? { apiFormat: configuredEntry.apiFormat } : {}),
+      ...(configuredEntry?.stream !== undefined ? { stream: configuredEntry.stream } : {}),
+    } as any);
+
+    return buildPipelineConfig({
+      currentConfig,
+      client,
+      model,
+    });
+  }
+
+  async function buildRadarPipelineConfig(
+    request: RadarModelRequest & { readonly llmOverride?: StudioBrowserLlmOverride },
+  ): Promise<PipelineConfig> {
+    const currentConfig = await loadCurrentProjectConfig({ requireApiKey: false });
+    if (request.llmOverride) {
+      return buildPipelineConfig({ currentConfig, llmOverride: request.llmOverride });
+    }
+
+    if (request.service && request.model) {
+      return buildServiceModelPipelineConfig(currentConfig, request.service, request.model);
+    }
+
+    const rawLlm = currentConfig.llm as unknown as Record<string, unknown>;
+    const configuredService = typeof rawLlm.service === "string" ? rawLlm.service.trim() : "";
+    const configuredDefaultModel = typeof rawLlm.defaultModel === "string" ? rawLlm.defaultModel.trim() : "";
+    if (configuredService && configuredDefaultModel) {
+      if (!isTextChatModelId(configuredDefaultModel)) {
+        throw new ApiError(400, "INVALID_RADAR_MODEL", nonTextModelMessage(configuredDefaultModel));
+      }
+      return buildServiceModelPipelineConfig(currentConfig, configuredService, configuredDefaultModel);
+    }
+
+    const fallbackModel = typeof currentConfig.llm.model === "string" ? currentConfig.llm.model.trim() : "";
+    if (fallbackModel && !isTextChatModelId(fallbackModel)) {
+      throw new ApiError(400, "INVALID_RADAR_MODEL", nonTextModelMessage(fallbackModel));
+    }
+    return buildPipelineConfig({ currentConfig });
   }
 
   // --- Books ---
@@ -2565,6 +2656,19 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     return c.json({ ok: true });
   });
 
+  app.post("/api/v1/agent/:sessionId/stop", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    stoppedAgentSessions.add(sessionId);
+    const aborted = abortAgentSession(sessionId, root);
+    broadcast("agent:error", {
+      sessionId,
+      error: aborted ? "已停止生成" : "当前没有正在生成的任务",
+      stopped: true,
+    });
+    broadcast("agent:complete", { sessionId, stopped: true });
+    return c.json({ ok: true, stopped: aborted });
+  });
+
   app.post("/api/v1/agent", async (c) => {
     const { instruction, activeBookId, sessionId: reqSessionId, model: reqModel, service: reqService, llmOverride: rawLlmOverride, coverOverride: rawCoverOverride } = await c.req.json<{
       instruction: string;
@@ -2589,6 +2693,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       return c.json({ error: message, response: message }, 400);
     }
 
+    stoppedAgentSessions.delete(sessionId);
     broadcast("agent:start", { instruction, activeBookId, sessionId });
 
     try {
@@ -2817,71 +2922,73 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
         pipeline.writeNextChapter(agentBookId).then(
           async (writeResult) => {
-          const responseText = [
-            `已为 ${agentBookId} 完成第 ${writeResult.chapterNumber} 章`,
-            writeResult.title ? `《${writeResult.title}》` : "",
-            `，字数 ${writeResult.wordCount}，状态 ${writeResult.status}。`,
-          ].join("");
-          const toolResult = {
-            content: [{ type: "text", text: responseText }],
-            details: {
-              kind: "chapter_written",
+            if (stoppedAgentSessions.has(streamSessionId)) return;
+            const responseText = [
+              `已为 ${agentBookId} 完成第 ${writeResult.chapterNumber} 章`,
+              writeResult.title ? `《${writeResult.title}》` : "",
+              `，字数 ${writeResult.wordCount}，状态 ${writeResult.status}。`,
+            ].join("");
+            const toolResult = {
+              content: [{ type: "text", text: responseText }],
+              details: {
+                kind: "chapter_written",
+                bookId: agentBookId,
+                chapterNumber: writeResult.chapterNumber,
+                title: writeResult.title,
+                wordCount: writeResult.wordCount,
+                status: writeResult.status,
+              },
+            };
+            broadcast("draft:delta", { sessionId: streamSessionId, text: responseText });
+            broadcast("tool:end", {
+              sessionId: streamSessionId,
+              id: toolCallId,
+              tool: "sub_agent",
+              result: toolResult,
+              details: toolResult.details,
+              isError: false,
+            });
+            broadcast("write:complete", {
               bookId: agentBookId,
+              sessionId: streamSessionId,
               chapterNumber: writeResult.chapterNumber,
+              status: writeResult.status,
               title: writeResult.title,
               wordCount: writeResult.wordCount,
-              status: writeResult.status,
-            },
-          };
-          broadcast("draft:delta", { sessionId: streamSessionId, text: responseText });
-          broadcast("tool:end", {
-            sessionId: streamSessionId,
-            id: toolCallId,
-            tool: "sub_agent",
-            result: toolResult,
-            details: toolResult.details,
-            isError: false,
-          });
-          broadcast("write:complete", {
-            bookId: agentBookId,
-            sessionId: streamSessionId,
-            chapterNumber: writeResult.chapterNumber,
-            status: writeResult.status,
-            title: writeResult.title,
-            wordCount: writeResult.wordCount,
-          });
-          await appendManualSessionMessages(root, bookSession.sessionId, [{
-            role: "assistant",
-            content: [{ type: "text", text: responseText }],
-            api: "anthropic-messages",
-            provider: configuredEntry?.service ?? reqService ?? effectiveLlmConfig.provider,
-            model: activeModel,
-            usage: {
-              input: 0,
-              output: 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: 0,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-            },
-            stopReason: "toolUse",
-            timestamp: Date.now(),
-          }], instruction);
-          await refreshBookSessionFromTranscript();
-          broadcast("agent:complete", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId });
+            });
+            await appendManualSessionMessages(root, bookSession.sessionId, [{
+              role: "assistant",
+              content: [{ type: "text", text: responseText }],
+              api: "anthropic-messages",
+              provider: configuredEntry?.service ?? reqService ?? effectiveLlmConfig.provider,
+              model: activeModel,
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "toolUse",
+              timestamp: Date.now(),
+            }], instruction);
+            await refreshBookSessionFromTranscript();
+            broadcast("agent:complete", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId });
           },
           (error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          const toolResult = { content: [{ type: "text", text: message }] };
-          broadcast("tool:end", {
-            sessionId: streamSessionId,
-            id: toolCallId,
-            tool: "sub_agent",
-            result: toolResult,
-            isError: true,
-          });
-          broadcast("write:error", { bookId: agentBookId, sessionId: streamSessionId, error: message });
-          broadcast("agent:error", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId, error: message });
+            if (stoppedAgentSessions.has(streamSessionId)) return;
+            const message = error instanceof Error ? error.message : String(error);
+            const toolResult = { content: [{ type: "text", text: message }] };
+            broadcast("tool:end", {
+              sessionId: streamSessionId,
+              id: toolCallId,
+              tool: "sub_agent",
+              result: toolResult,
+              isError: true,
+            });
+            broadcast("write:error", { bookId: agentBookId, sessionId: streamSessionId, error: message });
+            broadcast("agent:error", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId, error: message });
           },
         );
         return c.json({
@@ -2998,6 +3105,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         },
         instruction,
       );
+
+      if (stoppedAgentSessions.has(streamSessionId)) {
+        return c.json({
+          error: { code: "AGENT_STOPPED", message: "Stopped by user" },
+          response: "Stopped by user",
+        }, 499 as 400);
+      }
 
       if (result.responseText) {
         const actionExecutionError = validateAgentActionExecution({
@@ -3174,6 +3288,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         throw new ApiError(409, "SESSION_ALREADY_MIGRATED", migratedMessage);
       }
       const msg = e instanceof Error ? e.message : String(e);
+      if (stoppedAgentSessions.has(sessionId) || /abort|cancel|stopped/i.test(msg)) {
+        return c.json({
+          error: { code: "AGENT_STOPPED", message: "Stopped by user" },
+          response: "Stopped by user",
+        }, 499 as 400);
+      }
       broadcast("agent:error", { instruction, activeBookId, sessionId, error: msg });
 
       // Agent busy — return 429 with user-friendly message
@@ -3854,16 +3974,21 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   // --- Radar Scan ---
 
   app.post("/api/v1/radar/scan", async (c) => {
-    const body = await readJsonBody<{ llmOverride?: unknown }>(c);
+    const body = await readJsonBody<{ llmOverride?: unknown; service?: unknown; model?: unknown }>(c);
     const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
+    const modelRequest = normalizeRadarModelRequest(body);
     broadcast("radar:start", {});
     try {
-      const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
+      const pipeline = new PipelineRunner(await buildRadarPipelineConfig({ ...modelRequest, llmOverride }));
       const result = await pipeline.runRadar();
       await saveRadarScan(root, result);
       broadcast("radar:complete", { result });
       return c.json(result);
     } catch (e) {
+      if (e instanceof ApiError) {
+        broadcast("radar:error", { error: e.message });
+        return c.json({ error: { code: e.code, message: e.message } }, e.status as 400);
+      }
       broadcast("radar:error", { error: String(e) });
       return c.json({ error: String(e) }, 500);
     }

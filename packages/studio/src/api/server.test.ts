@@ -23,6 +23,7 @@ const createInteractionToolsFromDepsMock = vi.fn(() => ({}));
 const loadProjectSessionMock = vi.fn();
 const resolveSessionActiveBookMock = vi.fn();
 const runAgentSessionMock = vi.fn();
+const abortAgentSessionMock = vi.fn();
 const createAndPersistBookSessionMock = vi.fn();
 const loadBookSessionMock = vi.fn();
 const persistBookSessionMock = vi.fn();
@@ -215,6 +216,7 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
     loadProjectSession: loadProjectSessionMock,
     resolveSessionActiveBook: resolveSessionActiveBookMock,
     runAgentSession: runAgentSessionMock,
+    abortAgentSession: abortAgentSessionMock,
     buildAgentSystemPrompt: vi.fn(() => "You are helpful."),
     listAvailableGenres: actual.listAvailableGenres,
     readGenreProfile: actual.readGenreProfile,
@@ -395,6 +397,7 @@ describe("createStudioServer daemon lifecycle", () => {
     rollbackToChapterMock.mockResolvedValue([]);
     pipelineConfigs.length = 0;
     runAgentSessionMock.mockReset();
+    abortAgentSessionMock.mockReset();
     createAndPersistBookSessionMock.mockReset();
     loadBookSessionMock.mockReset();
     persistBookSessionMock.mockReset();
@@ -441,6 +444,7 @@ describe("createStudioServer daemon lifecycle", () => {
       responseText: "Agent response.",
       messages: [],
     });
+    abortAgentSessionMock.mockReturnValue(true);
     loadSecretsMock.mockResolvedValue({ services: {} });
     saveSecretsMock.mockResolvedValue(undefined);
     getServiceApiKeyMock.mockResolvedValue(undefined);
@@ -727,6 +731,59 @@ describe("createStudioServer daemon lifecycle", () => {
         temperature: 0.7,
       }),
     });
+  });
+
+  it("allows radar scans to use explicit service and model from Studio selection", async () => {
+    resolveServiceModelMock.mockResolvedValue({
+      model: { id: "gemini-2.5-flash", provider: "google", api: "openai-completions" },
+      apiKey: "sk-google",
+    });
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/radar/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service: "google",
+        model: "gemini-2.5-flash",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(resolveServiceModelMock).toHaveBeenCalledWith(
+      "google",
+      "gemini-2.5-flash",
+      root,
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      undefined,
+    );
+    expect(runRadarMock).toHaveBeenCalledTimes(1);
+    expect(pipelineConfigs.at(-1)).toMatchObject({
+      model: "gemini-2.5-flash",
+    });
+    expect(createLLMClientMock).toHaveBeenLastCalledWith(expect.objectContaining({
+      service: "google",
+      model: "gemini-2.5-flash",
+      apiKey: "sk-google",
+    }));
+  });
+
+  it("rejects non-text radar models before running the scan", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/radar/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service: "google",
+        model: "gemini-3.1-flash-image-preview",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(runRadarMock).not.toHaveBeenCalled();
   });
 
   it("persists Studio radar scans and exposes scan history", async () => {
@@ -2488,6 +2545,19 @@ describe("createStudioServer daemon lifecycle", () => {
     await vi.waitFor(() => expect(pipelineConfigs.at(-1)).toEqual(expect.objectContaining({
       writingReviewRetries: 3,
     })));
+  });
+
+  it("stops an active agent session and broadcasts stream finalizers", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent/agent-session-1/stop", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, stopped: true });
+    expect(abortAgentSessionMock).toHaveBeenCalledWith("agent-session-1", root);
   });
 
   it("handles explicit chat chapter edits outside the InkOS writing agent", async () => {

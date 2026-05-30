@@ -82,7 +82,23 @@ const TOOLS: ReadonlyArray<ToolDefinition> = [
       type: "object",
       properties: {
         title: { type: "string", description: "书名" },
-        genre: { type: "string", enum: ["xuanhuan", "xianxia", "urban", "horror", "other"], description: "题材" },
+        genre: {
+          type: "string",
+          enum: [
+            "xuanhuan",
+            "xianxia",
+            "urban",
+            "horror",
+            "mystery",
+            "historical",
+            "kehuan",
+            "wuxia",
+            "infinite-flow",
+            "system-flow",
+            "other",
+          ],
+          description: "题材",
+        },
         platform: { type: "string", enum: ["tomato", "feilu", "qidian", "other"], description: "目标平台" },
         brief: { type: "string", description: "创作简述/需求（自然语言）" },
       },
@@ -287,10 +303,12 @@ export async function runAgentLoop(
 ## 规则
 
 - 用户提供了题材/创意但没说要扫描市场 → 跳过 scan_market，直接 create_book
+- 中文题材优先映射到内置 profile：悬疑=mystery，历史=historical，科幻=kehuan，武侠=wuxia，无限流=infinite-flow，系统流=system-flow
 - 用户说了书名/bookId → 直接操作，不需要先 list_books
 - 每完成一步，简要汇报进展
 - 当用户要求“先把注意力拉回某条线”时，优先 update_current_focus，然后 plan_chapter / compose_chapter，再决定是否 write_draft 或 write_full_pipeline
 - 仿写流程：用户提供参考文本 → import_style → 生成 style_guide.md，后续写作自动参照
+- 创作技能流程：用户要求强化爽点、节奏、伏笔、反转、人物弧、规则感等 → 用 update_author_intent / update_current_focus / write_truth_file 固化为长期或短期控制，再调用写作/修订工具
 - 番外流程：先 create_book 建番外书 → import_canon 导入正传正典 → 然后正常 write_draft
 - 续写流程：用户提供已有章节 → import_chapters → 然后 write_draft 续写
 

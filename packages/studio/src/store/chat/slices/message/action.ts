@@ -14,6 +14,7 @@ import {
   deserializeMessages,
   extractErrorMessage,
   mergeSessionIds,
+  settleStreamingMessage,
   updateSession,
   upsertSessionSummary,
 } from "./runtime";
@@ -288,6 +289,25 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     }
   },
 
+  stopMessage: async (sessionId) => {
+    const session = get().sessions[sessionId];
+    session?.stream?.close();
+    set((state) => ({
+      sessions: updateSession(state.sessions, sessionId, (runtime) => ({
+        isStreaming: false,
+        stream: null,
+        messages: settleStreamingMessage(runtime.messages, "Stopped"),
+      })),
+    }));
+
+    try {
+      await fetchJson(`/agent/${sessionId}/stop`, { method: "POST" });
+    } catch {
+      // Local stop should still close the UI immediately even if the server
+      // already finished or the network request races with completion.
+    }
+  },
+
   sendMessage: async (sessionId, text, activeBookId) => {
     const trimmed = text.trim();
     const session = get().sessions[sessionId];
@@ -365,6 +385,11 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         }),
       });
 
+      const runtimeAfterRequest = get().sessions[sessionId];
+      if (!runtimeAfterRequest?.isStreaming && runtimeAfterRequest?.stream !== streamEs) {
+        return;
+      }
+
       if (data.background) {
         keepStreamOpen = true;
         return;
@@ -412,6 +437,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       }
     } catch (error) {
       streamEs.close();
+      const runtimeAfterStop = get().sessions[sessionId];
+      if (!runtimeAfterStop?.isStreaming && runtimeAfterStop?.stream !== streamEs) {
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       const hasStream = Boolean(
         get().sessions[sessionId]?.messages.some((message) => message.timestamp === streamTs),

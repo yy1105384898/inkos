@@ -116,6 +116,24 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).not.toContain("高权限兜底");
     });
 
+    it("with-book prompt auto-routes genre, style, and craft skills", () => {
+      const prompt = buildAgentSystemPrompt("my-book", "zh");
+      expect(prompt).toContain("import_style");
+      expect(prompt).toContain("style_guide.md");
+      expect(prompt).toContain("题材、文风、爽点、节奏、伏笔、反转、人物弧、规则感");
+      expect(prompt).toContain("sub_agent/import_style/write_truth_file");
+    });
+
+    it("creation prompt names new Chinese genre profiles", () => {
+      const prompt = buildAgentSystemPrompt(null, "zh");
+      expect(prompt).toContain("mystery");
+      expect(prompt).toContain("historical");
+      expect(prompt).toContain("kehuan");
+      expect(prompt).toContain("wuxia");
+      expect(prompt).toContain("infinite-flow");
+      expect(prompt).toContain("system-flow");
+    });
+
     it("with-book prompt names Phase 5 canonical truth paths", () => {
       const prompt = buildAgentSystemPrompt("my-book", "zh");
       expect(prompt).toContain("outline/story_frame.md");

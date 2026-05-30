@@ -20,11 +20,11 @@ import { ChatMessage } from "../components/chat/ChatMessage";
 import { QuickActions } from "../components/chat/QuickActions";
 import { ToolExecutionSteps } from "../components/chat/ToolExecutionSteps";
 import {
-  Loader2,
   BotMessageSquare,
   ArrowUp,
   ChevronDown,
   Check,
+  Square,
 } from "lucide-react";
 import { Shimmer } from "../components/ai-elements/shimmer";
 import {
@@ -72,6 +72,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   // -- Store actions --
   const setInput = useChatStore((s) => s.setInput);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const stopMessage = useChatStore((s) => s.stopMessage);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
   const loadSessionList = useChatStore((s) => s.loadSessionList);
   const createSession = useChatStore((s) => s.createSession);
@@ -254,6 +255,11 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     void sendMessage(activeSessionId, text, activeBookId);
   };
 
+  const onStop = () => {
+    if (!activeSessionId) return;
+    void stopMessage(activeSessionId);
+  };
+
   const handleQuickAction = (command: string) => {
     if (!activeSessionId) return;
     void sendMessage(activeSessionId, command, activeBookId);
@@ -398,11 +404,12 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                 />
                 <button
                   type="button"
-                  onClick={() => onSend(input)}
-                  disabled={!input.trim() || loading || !activeSessionId}
+                  onClick={() => loading ? onStop() : onSend(input)}
+                  disabled={loading ? !activeSessionId : (!input.trim() || !activeSessionId)}
+                  aria-label={loading ? (isZh ? "停止" : "Stop") : (isZh ? "发送" : "Send")}
                   className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-primary/20"
                 >
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} strokeWidth={2.5} />}
+                  {loading ? <Square size={12} fill="currentColor" /> : <ArrowUp size={14} strokeWidth={2.5} />}
                 </button>
               </div>
               <div className="flex items-center gap-2 px-3 pb-2 border-t border-border/20 pt-1.5">
