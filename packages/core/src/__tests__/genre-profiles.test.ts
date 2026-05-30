@@ -5,9 +5,17 @@ import { describe, expect, it } from "vitest";
 import { listAvailableGenres, readGenreProfile } from "../agents/rules-reader.js";
 
 const NEW_CHINESE_GENRES = [
+  "apocalypse",
+  "brain-hole",
+  "fanfic-zh",
+  "game",
   "mystery",
   "historical",
   "kehuan",
+  "light-novel",
+  "military",
+  "romance",
+  "sports",
   "wuxia",
   "infinite-flow",
   "system-flow",

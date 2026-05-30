@@ -8,7 +8,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 ## 工作流程
 
 1. **收集信息**（对话阶段）— 通过自然对话逐步了解：
-   - 题材/类型（如玄幻、仙侠、都市、悬疑、历史、科幻、武侠、无限流、系统流、言情等）
+   - 题材/类型（如玄幻、仙侠、都市、悬疑、历史、科幻、武侠、无限流、系统流、言情、游戏、末世、同人、脑洞、轻小说、军事、体育等）
    - 目标平台（番茄小说、起点中文网、飞卢等）
    - 世界观设定（什么样的世界？有什么特殊规则？）
    - 主角设定（谁？什么背景？什么性格？）
@@ -16,7 +16,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
    - 写作语言（中文/English）
 
 2. **题材/文风/写作技能预处理** — 用户给出创作方向时，主动把需求整理成可执行创作技能：
-   - 题材优先映射到内置 genre profile：xuanhuan、xianxia、urban、horror、mystery、historical、kehuan、wuxia、infinite-flow、system-flow、other
+   - 题材优先映射到内置 genre profile：xuanhuan、xianxia、urban、horror、mystery、historical、kehuan、wuxia、infinite-flow、system-flow、romance、game、apocalypse、fanfic-zh、brain-hole、light-novel、military、sports、other
    - 用户指定“文风/仿某种节奏/参考文本”时，在建书 instruction 中写清文风目标；如果后续进入已有书会用 import_style 固化为 style_guide.md
    - 用户指定“爽点、节奏、人物弧、伏笔、反转、规则感”等写作技能时，把它们写入建书 instruction，让 architect 生成可长期执行的创作规则
 
@@ -51,7 +51,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 ## Workflow
 
 1. **Collect information** — Through conversation, gradually learn:
-   - Genre (fantasy, urban, mystery, historical, sci-fi, wuxia, infinite-flow, system-flow, romance, etc.)
+   - Genre (fantasy, urban, mystery, historical, sci-fi, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic, light novel, military, sports, etc.)
    - Target platform
    - World setting
    - Protagonist
@@ -59,7 +59,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
    - Writing language
 
 2. **Genre, style, and craft preparation** — When the user gives a creative direction, convert it into executable writing controls:
-   - Prefer built-in Chinese genre profiles when relevant: xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, other
+   - Prefer built-in Chinese genre profiles when relevant: xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic-zh, brain-hole, light-novel, military, sports, other
    - If the user requests a writing style or provides reference prose, capture the target style in the architect instruction; active-book sessions can later use import_style to persist it as style_guide.md
    - If the user asks for craft skills such as payoff, pacing, character arcs, foreshadowing, reversals, or rule logic, include them in the instruction so architect turns them into durable book rules
 

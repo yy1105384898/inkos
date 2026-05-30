@@ -1,6 +1,6 @@
 ---
 name: inkos
-description: Autonomous novel writing CLI agent with web workbench (InkOS Studio) - use for creative fiction writing, standalone short-fiction packages, cover generation, novel generation, style imitation, chapter continuation/import, EPUB export, AIGC detection, and fan fiction. Native English support with 10 built-in English genre profiles (LitRPG, Progression Fantasy, Isekai, Cultivation, System Apocalypse, Dungeon Core, Romantasy, Sci-Fi, Tower Climber, Cozy Fantasy). Also supports Chinese web novel genres (xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, other). Multi-agent pipeline, two-phase writer (creative + settlement), stronger long-form chapter craft rules, hook-ledger payoff checks, 33-dimension auditing, token usage analytics, creative brief input, structured logging (JSON Lines), multi-model routing, custom OpenAI-compatible provider support, and InkOS Studio web UI for visual book management, short-fiction runs, cover generation, chapter review, real-time writing progress, market radar, and analytics.
+description: Autonomous novel writing CLI agent with web workbench (InkOS Studio) - use for creative fiction writing, standalone short-fiction packages, cover generation, novel generation, style imitation, chapter continuation/import, EPUB export, AIGC detection, and fan fiction. Native English support with 10 built-in English genre profiles (LitRPG, Progression Fantasy, Isekai, Cultivation, System Apocalypse, Dungeon Core, Romantasy, Sci-Fi, Tower Climber, Cozy Fantasy). Also supports Chinese web novel genres (xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic-zh, brain-hole, light-novel, military, sports, other). Multi-agent pipeline, two-phase writer (creative + settlement), stronger long-form chapter craft rules, hook-ledger payoff checks, 33-dimension auditing, token usage analytics, creative brief input, structured logging (JSON Lines), multi-model routing, custom OpenAI-compatible provider support, and InkOS Studio web UI for visual book management, short-fiction runs, cover generation, chapter review, real-time writing progress, market radar, and analytics.
 version: 2.3.4
 metadata: { "openclaw": { "emoji": "📖", "requires": { "bins": ["inkos", "node"], "env": ["OPENAI_API_KEY"] }, "primaryEnv": "OPENAI_API_KEY", "homepage": "https://github.com/Narcooo/inkos", "install": [{ "id": "npm", "kind": "node", "package": "@actalk/inkos", "label": "Install InkOS (npm)" }] } }
 ---
@@ -19,7 +19,7 @@ Truth files are persisted as schema-validated JSON (`story/state/*.json`) with m
 ## When to Use InkOS
 
 - **English novel writing**: Native English support with 10 genre profiles (LitRPG, Progression Fantasy, Isekai, etc.). Set `--lang en`
-- **Chinese web novel writing**: built-in Chinese genres (xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, other)
+- **Chinese web novel writing**: built-in Chinese genres (xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic-zh, brain-hole, light-novel, military, sports, other)
 - **Fan fiction**: Create fanfic from source material with 4 modes (canon, au, ooc, cp)
 - **Batch chapter generation**: Generate multiple chapters with consistent quality
 - **Import & continue**: Import existing chapters from a text file, reverse-engineer truth files, and continue writing
@@ -84,7 +84,7 @@ inkos status
    # Or with a creative brief (your worldbuilding doc / ideas):
    inkos book create --title "My Novel Title" --genre xuanhuan --chapter-words 3000 --brief my-ideas.md
    ```
-   - Genres: `xuanhuan` (玄幻), `xianxia` (仙侠), `urban` (都市), `horror` (恐怖), `mystery` (悬疑), `historical` (历史), `kehuan` (科幻), `wuxia` (武侠), `infinite-flow` (无限流), `system-flow` (系统流), `other` (通用)
+   - Genres: `xuanhuan` (玄幻), `xianxia` (仙侠), `urban` (都市), `horror` (恐怖), `mystery` (悬疑), `historical` (历史), `kehuan` (科幻), `wuxia` (武侠), `infinite-flow` (无限流), `system-flow` (系统流), `romance` (言情), `game` (游戏), `apocalypse` (末世), `fanfic-zh` (同人), `brain-hole` (脑洞), `light-novel` (轻小说), `military` (军事), `sports` (体育竞技), `other` (通用)
    - Returns a `book-id` for all subsequent operations
 
 2. **Generate initial chapters** (e.g., 5 chapters):
@@ -422,7 +422,7 @@ The right-side **AI Assistant panel** in Studio shares the same interaction kern
 
 For Chinese web novel creation, the assistant should automatically map user intent to the closest built-in genre profile and writing controls:
 
-- **Genre profiles**: `mystery` for clue/reversal stories, `historical` for period politics and war, `kehuan` for science fiction, `wuxia` for jianghu martial arts, `infinite-flow` for dungeon/rule instances, `system-flow` for task/reward progression.
+- **Genre profiles**: `mystery` for clue/reversal stories, `historical` for period politics and war, `kehuan` for science fiction, `wuxia` for jianghu martial arts, `infinite-flow` for dungeon/rule instances, `system-flow` for task/reward progression, `romance` for emotional payoff, `game` for game systems, `apocalypse` for survival scarcity, `fanfic-zh` for canon-aware fanfic, `brain-hole` for high-concept ideas, `light-novel` for light character interaction, `military` for war logistics, and `sports` for competition arcs.
 - **Style skill**: when the user provides reference prose or asks to imitate a style, use `import_style` so `story/style_profile.json` and `story/style_guide.md` become durable writing controls.
 - **Craft skills**: for pacing, payoff, foreshadowing, reversals, character arcs, rule logic, anti-AI prose, and platform rhythm, persist durable rules with `write_truth_file` (`author_intent.md`, `current_focus.md`, or Phase 5 outline files) before calling the relevant sub-agent.
 - **Execution rule**: do not merely say "I will use the style/genre/skill"; call `sub_agent`, `import_style`, or `write_truth_file` when the user request can be executed through those tools.
@@ -551,6 +551,14 @@ inkos genre show infinite-flow
 | `wuxia` | 武侠 | jianghu reputation, martial arts, grudges, chivalric choices |
 | `infinite-flow` | 无限流 | instances, rules, teams, items, survival settlement |
 | `system-flow` | 系统流 | tasks, rewards, ability limits, measurable progression |
+| `romance` | 言情 | relationship pull, emotional payoff, preference, misunderstanding |
+| `game` | 游戏 | mechanics, equipment, rankings, guilds, tactical play |
+| `apocalypse` | 末世 | scarcity, base building, survival, order rebuilding |
+| `fanfic-zh` | 同人 | canon fidelity, famous-scene rewrites, ripple effects |
+| `brain-hole` | 脑洞 | high-concept rules, absurd logic, twist recovery |
+| `light-novel` | 轻小说 | character interaction, daily hooks, comedic contrast |
+| `military` | 军事 | intelligence, tactics, logistics, battlefield cost |
+| `sports` | 体育竞技 | training payoff, match tactics, team relations |
 | `other` | 通用 | fallback or custom mixed genres |
 
 ### Create Custom Genre
