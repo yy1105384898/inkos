@@ -70,7 +70,7 @@ const SubAgentParams = Type.Object({
   chapterNumber: Type.Optional(Type.Number({ description: "auditor/reviser: target chapter number. Omit to use the latest chapter." })),
   // -- architect params --
   title: Type.Optional(Type.String({ description: "architect only: explicit book title. Required when creating a book." })),
-  genre: Type.Optional(Type.String({ description: "architect only: genre (xuanhuan, xianxia, urban, horror, mystery, historical, kehuan, wuxia, infinite-flow, system-flow, romance, game, apocalypse, fanfic-zh, brain-hole, light-novel, military, sports, other, etc.)" })),
+  genre: Type.Optional(Type.String({ description: "architect only: genre (xuanhuan, xianxia, urban, horror, mystery, detective, crime, historical, court-politics, officialdom, palace, kehuan, cyberpunk, space-opera, mecha, wuxia, fantasy, western-fantasy, infinite-flow, system-flow, romance, game, e-sports, apocalypse, survival, supernatural, fanfic-zh, brain-hole, workplace, business, legal, medical, entertainment, live-stream, farming, food, rebirth, transmigration, quick-transmigration, beast-taming, summoning, antihero, etc.)" })),
   platform: Type.Optional(Type.Union([
     Type.Literal("tomato"),
     Type.Literal("qidian"),
