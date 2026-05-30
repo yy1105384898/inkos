@@ -2485,9 +2485,9 @@ describe("createStudioServer daemon lifecycle", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(pipelineConfigs.at(-1)).toEqual(expect.objectContaining({
+    await vi.waitFor(() => expect(pipelineConfigs.at(-1)).toEqual(expect.objectContaining({
       writingReviewRetries: 3,
-    }));
+    })));
   });
 
   it("handles explicit chat chapter edits outside the InkOS writing agent", async () => {

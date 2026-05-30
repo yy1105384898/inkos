@@ -1703,6 +1703,33 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   // --- Actions ---
 
+  function runBackgroundBookTask<T>(params: {
+    readonly bookId: string;
+    readonly startEvent: string;
+    readonly completeEvent: string;
+    readonly errorEvent: string;
+    readonly run: () => Promise<T>;
+    readonly completeData: (result: T) => Record<string, unknown>;
+  }): void {
+    broadcast(params.startEvent, { bookId: params.bookId });
+    void Promise.resolve()
+      .then(params.run)
+      .then(
+        (result) => {
+          broadcast(params.completeEvent, {
+            bookId: params.bookId,
+            ...params.completeData(result),
+          });
+        },
+        (e) => {
+          broadcast(params.errorEvent, {
+            bookId: params.bookId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        },
+      );
+  }
+
   app.post("/api/v1/books/:id/write-next", async (c) => {
     const id = c.req.param("id");
     const body = await c.req
@@ -1710,19 +1737,24 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       .catch(() => ({ wordCount: undefined }) as { wordCount?: number; llmOverride?: unknown });
     const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
-    broadcast("write:start", { bookId: id });
+    runBackgroundBookTask({
+      bookId: id,
+      startEvent: "write:start",
+      completeEvent: "write:complete",
+      errorEvent: "write:error",
+      run: async () => {
+        const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
+        return pipeline.writeNextChapter(id, body.wordCount);
+      },
+      completeData: (result) => ({
+        chapterNumber: result.chapterNumber,
+        status: result.status,
+        title: result.title,
+        wordCount: result.wordCount,
+      }),
+    });
 
     // Fire and forget — progress/completion/errors pushed via SSE
-    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
-    pipeline.writeNextChapter(id, body.wordCount).then(
-      (result) => {
-        broadcast("write:complete", { bookId: id, chapterNumber: result.chapterNumber, status: result.status, title: result.title, wordCount: result.wordCount });
-      },
-      (e) => {
-        broadcast("write:error", { bookId: id, error: e instanceof Error ? e.message : String(e) });
-      },
-    );
-
     return c.json({ status: "writing", bookId: id });
   });
 
@@ -1737,17 +1769,22 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       });
     const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
 
-    broadcast("draft:start", { bookId: id });
+    runBackgroundBookTask({
+      bookId: id,
+      startEvent: "draft:start",
+      completeEvent: "draft:complete",
+      errorEvent: "draft:error",
+      run: async () => {
+        const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
+        return pipeline.writeDraft(id, body.context, body.wordCount);
+      },
+      completeData: (result) => ({
+        chapterNumber: result.chapterNumber,
+        title: result.title,
+        wordCount: result.wordCount,
+      }),
+    });
 
-    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
-    pipeline.writeDraft(id, body.context, body.wordCount).then(
-      (result) => {
-        broadcast("draft:complete", { bookId: id, chapterNumber: result.chapterNumber, title: result.title, wordCount: result.wordCount });
-      },
-      (e) => {
-        broadcast("draft:error", { bookId: id, error: e instanceof Error ? e.message : String(e) });
-      },
-    );
 
     return c.json({ status: "drafting", bookId: id });
   });
@@ -1755,9 +1792,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   app.post("/api/v1/books/:id/chapters/:num/approve", async (c) => {
     const id = c.req.param("id");
     const num = parseInt(c.req.param("num"), 10);
+    if (!Number.isInteger(num) || num < 1) {
+      return c.json({ error: "Invalid chapter number" }, 400);
+    }
 
     try {
       const index = await state.loadChapterIndex(id);
+      const target = index.find((ch) => ch.number === num);
+      if (!target) {
+        return c.json({ error: `Chapter ${num} not found` }, 404);
+      }
       const updated = index.map((ch) =>
         ch.number === num ? { ...ch, status: "approved" as const } : ch,
       );
