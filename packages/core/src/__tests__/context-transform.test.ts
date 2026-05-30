@@ -47,7 +47,7 @@ describe("createBookContextTransform", () => {
     expect(result[1]).toBe(original[0]);
   });
 
-  it("sorts truth files in priority order", async () => {
+  it("sorts stable truth files before volatile state files", async () => {
     const storyDir = join(projectRoot, "books", bookId, "story");
     await writeFile(join(storyDir, "volume_outline.md"), "# Volume Outline");
     await writeFile(join(storyDir, "book_rules.md"), "# Book Rules");
@@ -67,8 +67,8 @@ describe("createBookContextTransform", () => {
 
     expect(bibleIdx).toBeLessThan(outlineIdx);
     expect(outlineIdx).toBeLessThan(rulesIdx);
-    expect(rulesIdx).toBeLessThan(focusIdx);
-    expect(focusIdx).toBeLessThan(extraIdx);
+    expect(rulesIdx).toBeLessThan(extraIdx);
+    expect(extraIdx).toBeLessThan(focusIdx);
   });
 
   it("returns original messages when story/ directory does not exist", async () => {

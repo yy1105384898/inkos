@@ -48,6 +48,7 @@ import {
   type LogSink,
   type LogEntry,
 } from "@actalk/inkos-core";
+import { createHash } from "node:crypto";
 import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSafeBookId } from "./safety.js";
@@ -547,8 +548,40 @@ type EventHandler = (event: string, data: unknown) => void;
 const subscribers = new Set<EventHandler>();
 const bookCreateStatus = new Map<string, { status: "creating" | "error"; error?: string }>();
 
-// 内存缓存：service -> 模型列表 + 更新时间戳；避免每次 sidebar 挂载时都打真实 LLM /models
-const modelListCache = new Map<string, { models: Array<{ id: string; name: string }>; at: number }>();
+type StudioModelListItem = {
+  id: string;
+  name: string;
+  maxOutput?: number;
+  contextWindow?: number;
+};
+
+const MODEL_LIST_CACHE_TTL_MS = 10 * 60 * 1000;
+// Cache model discovery/probe results only. Do not cache generation output.
+const modelListCache = new Map<string, { models: StudioModelListItem[]; at: number }>();
+
+function apiKeyFingerprint(apiKey: string | undefined): string {
+  const trimmed = apiKey?.trim() ?? "";
+  if (!trimmed) return "";
+  return createHash("sha256").update(trimmed).digest("hex").slice(0, 16);
+}
+
+function modelListCacheKey(service: string, baseUrl: string | undefined, apiKey: string | undefined): string {
+  return [service, baseUrl ?? "", apiKeyFingerprint(apiKey)].join("::");
+}
+
+function getCachedModelList(cacheKey: string): StudioModelListItem[] | undefined {
+  const cached = modelListCache.get(cacheKey);
+  if (!cached) return undefined;
+  if (Date.now() - cached.at > MODEL_LIST_CACHE_TTL_MS) {
+    modelListCache.delete(cacheKey);
+    return undefined;
+  }
+  return cached.models;
+}
+
+function setCachedModelList(cacheKey: string, models: StudioModelListItem[]): void {
+  modelListCache.set(cacheKey, { models, at: Date.now() });
+}
 
 interface ServiceConfigEntry {
   service: string;
@@ -1182,6 +1215,9 @@ async function fetchModelsFromServiceBaseUrl(
     ? baseUrl
     : endpoint?.modelsBaseUrl ?? (endpoint ? baseUrl : resolveServiceModelsBaseUrl(serviceId) ?? baseUrl);
   const modelsUrl = modelsBaseUrl.replace(/\/$/, "") + "/models";
+  const cacheKey = modelListCacheKey(`probe:${serviceId}`, modelsBaseUrl, apiKey);
+  const cachedModels = getCachedModelList(cacheKey);
+  if (cachedModels) return { models: cachedModels };
   try {
     const res = await fetchWithProxy(modelsUrl, {
       headers: buildBearerAuthHeaders(apiKey),
@@ -1196,9 +1232,9 @@ async function fetchModelsFromServiceBaseUrl(
       };
     }
     const json = await res.json() as { data?: Array<{ id: string }> };
-    return {
-      models: (json.data ?? []).map((m) => ({ id: m.id, name: m.id })),
-    };
+    const models = (json.data ?? []).map((m) => ({ id: m.id, name: m.id }));
+    setCachedModelList(cacheKey, models);
+    return { models };
   } catch (error) {
     return {
       models: [],
@@ -1382,6 +1418,7 @@ async function probeServiceCapabilities(args: {
 // --- Server factory ---
 
 export function createStudioServer(initialConfig: ProjectConfig, root: string) {
+  modelListCache.clear();
   const app = new Hono();
   const state = new StateManager(root);
   let cachedConfig = initialConfig;
@@ -2072,6 +2109,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     }
     syncTopLevelLlmMirror(llm);
     await saveRawConfig(root, config);
+    modelListCache.clear();
     return c.json({ ok: true });
   });
 
@@ -2143,6 +2181,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       delete secrets.services[key];
     }
     await saveSecrets(root, secrets);
+    modelListCache.clear();
     return c.json({ ok: true, service });
   });
 
@@ -2240,6 +2279,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     });
     if (!trimmedKey && !apiKeyOptional) return c.json({ models: [] });
 
+    const cacheKey = modelListCacheKey(`browser:${serviceId}`, resolvedBaseUrl, trimmedKey);
+    const cached = getCachedModelList(cacheKey);
+    if (cached) return c.json({ models: cached });
+
     const enriched = await listModelsForService(
       baseService,
       trimmedKey,
@@ -2251,6 +2294,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       ...(m.maxOutput !== undefined ? { maxOutput: m.maxOutput } : {}),
       ...(m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
     }));
+    setCachedModelList(cacheKey, models);
     return c.json({ models });
   });
 
@@ -2342,6 +2386,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       delete secrets.services[service];
     }
     await saveSecrets(root, secrets);
+    modelListCache.clear();
     return c.json({ ok: true });
   });
 
@@ -2393,13 +2438,23 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       }))
       .filter((s) => s.baseUrl && Boolean(secrets.services[s.id]?.apiKey));
 
-    const groups = await Promise.all(customs.map(async (s) => ({
-      service: s.id,
-      label: s.label,
-      models: filterTextChatModels(
+    const groups = await Promise.all(customs.map(async (s) => {
+      const cacheKey = modelListCacheKey(`custom-list:${s.id}`, s.baseUrl, secrets.services[s.id].apiKey);
+      const cached = getCachedModelList(cacheKey);
+      const models = cached ?? filterTextChatModels(
         await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
-      ),
-    })));
+      ).map((model) => ({
+        id: model.id,
+        name: model.name,
+        contextWindow: model.contextWindow,
+      }));
+      if (!cached) setCachedModelList(cacheKey, models);
+      return {
+        service: s.id,
+        label: s.label,
+        models,
+      };
+    }));
 
     return c.json({ groups });
   });
@@ -2420,13 +2475,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     // No key = no models, except local/self-hosted endpoints such as Ollama.
     if (!apiKey && !apiKeyOptional) return c.json({ models: [] });
 
-    // Cache by service + resolved baseUrl + apiKey fingerprint; valid for 10 min unless ?refresh=1
-    const cacheKey = `${service}::${resolvedBaseUrl ?? ""}::${apiKey.slice(-8)}`;
+    const cacheKey = modelListCacheKey(`service:${service}`, resolvedBaseUrl, apiKey);
     if (!refresh) {
-      const cached = modelListCache.get(cacheKey);
-      if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
-        return c.json({ models: cached.models });
-      }
+      const cached = getCachedModelList(cacheKey);
+      if (cached) return c.json({ models: cached });
     }
 
     // B13: 走 listModelsForService 走 live probe + bank 交叉，返回带元数据的 models
@@ -2441,7 +2493,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       ...(m.maxOutput !== undefined ? { maxOutput: m.maxOutput } : {}),
       ...(m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
     }));
-    modelListCache.set(cacheKey, { models, at: Date.now() });
+    setCachedModelList(cacheKey, models);
     return c.json({ models });
   });
 
