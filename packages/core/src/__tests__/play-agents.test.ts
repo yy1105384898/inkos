@@ -75,10 +75,18 @@ describe("play agents", () => {
 });
 
 describe("scene renderer prompt by mode", () => {
-  it("guided 模式要求每回合给 2-4 个选项", () => {
+  it("guided 模式把选项做成可选跳板，而非每回合强制", () => {
     const prompt = buildSceneRendererSystemPrompt("guided");
-    expect(prompt).toContain("2-4");
-    expect(prompt).toMatch(/必须|每回合/);
+    expect(prompt).toContain("0-3");
+    expect(prompt).toContain("不必每回合");
+    expect(prompt).toContain("不是唯一前进方式");
+    expect(prompt).not.toMatch(/必须给 2-4|每回合都要给/);
+  });
+
+  it("允许'在场'回合并让世界自走、不催玩家行动", () => {
+    const prompt = buildSceneRendererSystemPrompt("guided");
+    expect(prompt).toContain("呼吸"); // presence is a valid, breathing turn
+    expect(prompt).toContain("世界不是死的"); // world runs on its own clock
   });
 
   it("open 模式不强制选项数量", () => {
