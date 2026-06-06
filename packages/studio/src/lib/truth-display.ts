@@ -173,6 +173,7 @@ export interface PendingHook {
   readonly content: string; // 备注 — the actual foreshadow / setup text
   readonly payoff: string; // 回收卷 — where it pays off
   readonly core: boolean; // 核心 — load-bearing hook
+  readonly promoted?: boolean; // 升级 — true means live hook debt; false means seed pool
 }
 
 function splitTableRow(line: string): string[] {
@@ -192,6 +193,7 @@ export function parsePendingHooks(md: string): ReadonlyArray<PendingHook> {
   const typeIdx = colOf("类型");
   const payoffIdx = colOf("回收卷");
   const coreIdx = colOf("核心");
+  const promotedIdx = colOf("升级", "promoted");
   const contentIdx = colOf("备注");
 
   return rows
@@ -205,8 +207,17 @@ export function parsePendingHooks(md: string): ReadonlyArray<PendingHook> {
       content: contentIdx >= 0 ? cells[contentIdx] : "",
       payoff: payoffIdx >= 0 ? cells[payoffIdx] : "",
       core: coreIdx >= 0 && cells[coreIdx] === "是",
+      promoted: promotedIdx >= 0 ? parsePromotedCell(cells[promotedIdx]) : undefined,
     }))
     .filter((hook) => hook.content.length > 0 || hook.id.length > 0);
+}
+
+function parsePromotedCell(cell: string | undefined): boolean | undefined {
+  const normalized = (cell ?? "").trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (/^(true|yes|y|是|核心|core|1|✓|✔|promoted|已升级)$/.test(normalized)) return true;
+  if (/^(false|no|n|否|未升级|seed|0|✗|✘)$/.test(normalized)) return false;
+  return undefined;
 }
 
 export const FOUNDATION_FILE_ORDER: ReadonlyArray<string> = [

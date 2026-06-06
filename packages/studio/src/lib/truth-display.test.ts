@@ -188,6 +188,19 @@ describe("parsePendingHooks", () => {
     expect(hooks[1].payoff).toBe("第二卷中段");
   });
 
+  it("parses promoted state so seed hooks are not confused with active hook debt", () => {
+    const phase7 = [
+      "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 半衰期 | 升级 | 备注 |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| H001 | 0 | 主线伏笔 | open | 0 | 200 | slow-burn | 无 | 第五卷 | 是 | 10 | 是 | 父亲专利的黑箱。 |",
+      "| H004 | 0 | 次要伏笔 | open | 0 | 70 | near-term | 无 | 第二卷 | 否 | 10 | 否 | 室友游戏债。 |",
+    ].join("\n");
+
+    const hooks = parsePendingHooks(phase7);
+    expect(hooks[0]).toMatchObject({ id: "H001", promoted: true });
+    expect(hooks[1]).toMatchObject({ id: "H004", promoted: false });
+  });
+
   it("is robust to column reordering (parses by header name)", () => {
     const reordered = [
       "| 备注 | 类型 | hook_id | 核心 |",

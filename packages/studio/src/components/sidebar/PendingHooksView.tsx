@@ -29,6 +29,16 @@ export function PendingHooksView({ content }: PendingHooksViewProps) {
       {hooks.map((hook) => (
         <div key={hook.id} className="rounded-lg bg-secondary/30 px-3 py-2.5">
           <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+            {hook.promoted === false && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-500/10 text-muted-foreground">
+                种子
+              </span>
+            )}
+            {hook.promoted === true && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                活跃
+              </span>
+            )}
             {hook.type && (
               <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", hookTypeColor(hook.type))}>
                 {hook.type}
