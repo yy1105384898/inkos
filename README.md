@@ -53,7 +53,7 @@ YANGYANG 小说 Agent 是基于 InkOS 二次开发的中文小说创作 Agent，
 > 欢迎加群反馈问题、提出需求，也欢迎关注项目动态 — 我们的目标是做最强的基于小说的内容生态创作 AI Agent。
 
 <p align="center">
-  <img src="assets/4e50013fc562bdccb579eda0b77fd1a2.jpg" width="300" alt="微信交流群">
+  <img src="assets/微信图片_20260602105007_58_490.jpg" width="300" alt="微信交流群">
 </p>
 
 ## 快速开始
