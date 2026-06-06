@@ -97,7 +97,7 @@ ${stateDiff || "(no changes)"}
 ${hooksDiff || "(no changes)"}
 
 ## Chapter Text (for reference)
-${chapterContent.slice(0, 6000)}`;
+${chapterContent}`;
 
     try {
       const response = await this.chat(
@@ -135,9 +135,9 @@ ${chapterContent.slice(0, 6000)}`;
   private buildAuthorityContextBlock(authorityContext?: StateValidationAuthorityContext): string {
     if (!authorityContext) return "## Authority / Cross-Truth Context\n(no authority context provided)";
 
-    const storyFrame = this.truncateHead(authorityContext.storyFrame ?? "", 3500);
-    const bookRules = this.truncateHead(authorityContext.bookRules ?? "", 2000);
-    const chapterSummaries = this.truncateTail(authorityContext.chapterSummaries ?? "", 3500);
+    const storyFrame = (authorityContext.storyFrame ?? "").trim();
+    const bookRules = (authorityContext.bookRules ?? "").trim();
+    const chapterSummaries = (authorityContext.chapterSummaries ?? "").trim();
 
     return [
       "## Authority / Cross-Truth Context",
@@ -152,18 +152,6 @@ ${chapterContent.slice(0, 6000)}`;
       "### recent chapter_summaries excerpt",
       chapterSummaries || "(empty)",
     ].join("\n");
-  }
-
-  private truncateHead(text: string, maxChars: number): string {
-    const trimmed = text.trim();
-    if (trimmed.length <= maxChars) return trimmed;
-    return `${trimmed.slice(0, maxChars).trimEnd()}\n\n[...truncated...]`;
-  }
-
-  private truncateTail(text: string, maxChars: number): string {
-    const trimmed = text.trim();
-    if (trimmed.length <= maxChars) return trimmed;
-    return `[...truncated...]\n\n${trimmed.slice(-maxChars).trimStart()}`;
   }
 
   private parseResult(content: string): ValidationResult {

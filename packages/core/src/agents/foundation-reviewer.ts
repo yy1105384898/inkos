@@ -28,10 +28,10 @@ export class FoundationReviewerAgent extends BaseAgent {
     readonly language: "zh" | "en";
   }): Promise<FoundationReviewResult> {
     const canonBlock = params.sourceCanon
-      ? `\n## 原作正典参照\n${params.sourceCanon.slice(0, 8000)}\n`
+      ? `\n## 原作正典参照\n${params.sourceCanon}\n`
       : "";
     const styleBlock = params.styleGuide
-      ? `\n## 原作风格参照\n${params.styleGuide.slice(0, 2000)}\n`
+      ? `\n## 原作风格参照\n${params.styleGuide}\n`
       : "";
 
     const dimensions = params.mode === "original"
@@ -166,8 +166,8 @@ Be strict. 80 means "ready to write without changes."`;
 
   private buildFoundationExcerpt(foundation: ArchitectOutput, language: "zh" | "en"): string {
     return language === "en"
-      ? `## Story Bible\n${foundation.storyBible.slice(0, 3000)}\n\n## Volume Outline\n${foundation.volumeOutline.slice(0, 3000)}\n\n## Book Rules\n${foundation.bookRules.slice(0, 1500)}\n\n## Initial State\n${foundation.currentState.slice(0, 1000)}\n\n## Initial Hooks\n${foundation.pendingHooks.slice(0, 1000)}`
-      : `## 世界设定\n${foundation.storyBible.slice(0, 3000)}\n\n## 卷纲\n${foundation.volumeOutline.slice(0, 3000)}\n\n## 规则\n${foundation.bookRules.slice(0, 1500)}\n\n## 初始状态\n${foundation.currentState.slice(0, 1000)}\n\n## 初始伏笔\n${foundation.pendingHooks.slice(0, 1000)}`;
+      ? `## Story Bible\n${foundation.storyBible}\n\n## Volume Outline\n${foundation.volumeOutline}\n\n## Book Rules\n${foundation.bookRules}\n\n## Initial State\n${foundation.currentState}\n\n## Initial Hooks\n${foundation.pendingHooks}`
+      : `## 世界设定\n${foundation.storyBible}\n\n## 卷纲\n${foundation.volumeOutline}\n\n## 规则\n${foundation.bookRules}\n\n## 初始状态\n${foundation.currentState}\n\n## 初始伏笔\n${foundation.pendingHooks}`;
   }
 
   private parseReviewResult(
