@@ -23,6 +23,19 @@ describe("hash route", () => {
       expect(parseHash("#/book/my-novel/settings")).toEqual({ page: "book-settings", bookId: "my-novel" });
     });
 
+    it("parses chapter route", () => {
+      expect(parseHash("#/book/my-novel/chapters/12")).toEqual({
+        page: "chapter",
+        bookId: "my-novel",
+        chapterNumber: 12,
+      });
+    });
+
+    it("parses book scoped tool routes", () => {
+      expect(parseHash("#/book/my-novel/analytics")).toEqual({ page: "analytics", bookId: "my-novel" });
+      expect(parseHash("#/book/my-novel/truth")).toEqual({ page: "truth", bookId: "my-novel" });
+    });
+
     it("decodes encoded bookId", () => {
       expect(parseHash("#/book/%E4%B9%9D%E9%BE%99")).toEqual({ page: "book", bookId: "九龙" });
     });
@@ -37,6 +50,17 @@ describe("hash route", () => {
 
     it("parses services", () => {
       expect(parseHash("#/services")).toEqual({ page: "services" });
+    });
+
+    it("parses global tool pages", () => {
+      expect(parseHash("#/daemon")).toEqual({ page: "daemon" });
+      expect(parseHash("#/logs")).toEqual({ page: "logs" });
+      expect(parseHash("#/genres")).toEqual({ page: "genres" });
+      expect(parseHash("#/style")).toEqual({ page: "style" });
+      expect(parseHash("#/import")).toEqual({ page: "import" });
+      expect(parseHash("#/radar")).toEqual({ page: "radar" });
+      expect(parseHash("#/doctor")).toEqual({ page: "doctor" });
+      expect(parseHash("#/admin")).toEqual({ page: "admin" });
     });
 
     it("parses service-detail", () => {
@@ -69,6 +93,15 @@ describe("hash route", () => {
       expect(routeToHash({ page: "book-settings", bookId: "novel-1" })).toBe("#/book/novel-1/settings");
     });
 
+    it("chapter -> #/book/{id}/chapters/{chapter}", () => {
+      expect(routeToHash({ page: "chapter", bookId: "novel-1", chapterNumber: 12 })).toBe("#/book/novel-1/chapters/12");
+    });
+
+    it("book scoped tool routes -> hash", () => {
+      expect(routeToHash({ page: "analytics", bookId: "novel-1" })).toBe("#/book/novel-1/analytics");
+      expect(routeToHash({ page: "truth", bookId: "novel-1" })).toBe("#/book/novel-1/truth");
+    });
+
     it("encodes Chinese bookId", () => {
       const hash = routeToHash({ page: "book", bookId: "九龙城夜行" });
       expect(hash).toContain("#/book/");
@@ -93,9 +126,15 @@ describe("hash route", () => {
       expect(decodeURIComponent(hash)).toContain("自定义");
     });
 
-    it("non-hash pages return empty string", () => {
-      expect(routeToHash({ page: "daemon" })).toBe("");
-      expect(routeToHash({ page: "logs" })).toBe("");
+    it("global tool pages -> hash", () => {
+      expect(routeToHash({ page: "daemon" })).toBe("#/daemon");
+      expect(routeToHash({ page: "logs" })).toBe("#/logs");
+      expect(routeToHash({ page: "genres" })).toBe("#/genres");
+      expect(routeToHash({ page: "style" })).toBe("#/style");
+      expect(routeToHash({ page: "import" })).toBe("#/import");
+      expect(routeToHash({ page: "radar" })).toBe("#/radar");
+      expect(routeToHash({ page: "doctor" })).toBe("#/doctor");
+      expect(routeToHash({ page: "admin" })).toBe("#/admin");
     });
   });
 });

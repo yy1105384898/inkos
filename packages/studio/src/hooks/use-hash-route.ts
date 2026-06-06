@@ -27,6 +27,13 @@ function parseHash(hash: string): HashRoute {
   if (path === "chat") return { page: "chat" };
   if (path === "config" || path === "services") return { page: "services" };
   if (path === "book/new") return { page: "book-create" };
+  if (path === "daemon") return { page: "daemon" };
+  if (path === "logs") return { page: "logs" };
+  if (path === "genres") return { page: "genres" };
+  if (path === "style") return { page: "style" };
+  if (path === "import") return { page: "import" };
+  if (path === "radar") return { page: "radar" };
+  if (path === "doctor") return { page: "doctor" };
   if (path === "admin") return { page: "admin" };
 
   const serviceMatch = path.match(/^services\/([^/]+)$/);
@@ -34,6 +41,21 @@ function parseHash(hash: string): HashRoute {
 
   const bookSettingsMatch = path.match(/^book\/([^/]+)\/settings$/);
   if (bookSettingsMatch) return { page: "book-settings", bookId: decodeURIComponent(bookSettingsMatch[1]) };
+
+  const chapterMatch = path.match(/^book\/([^/]+)\/chapters\/(\d+)$/);
+  if (chapterMatch) {
+    return {
+      page: "chapter",
+      bookId: decodeURIComponent(chapterMatch[1]),
+      chapterNumber: Number(chapterMatch[2]),
+    };
+  }
+
+  const analyticsMatch = path.match(/^book\/([^/]+)\/analytics$/);
+  if (analyticsMatch) return { page: "analytics", bookId: decodeURIComponent(analyticsMatch[1]) };
+
+  const truthMatch = path.match(/^book\/([^/]+)\/truth$/);
+  if (truthMatch) return { page: "truth", bookId: decodeURIComponent(truthMatch[1]) };
 
   const bookMatch = path.match(/^book\/([^/]+)$/);
   if (bookMatch) return { page: "book", bookId: decodeURIComponent(bookMatch[1]) };
@@ -50,6 +72,16 @@ function routeToHash(route: HashRoute): string {
     case "book-create": return "#/book/new";
     case "services": return "#/services";
     case "service-detail": return `#/services/${encodeURIComponent(route.serviceId)}`;
+    case "chapter": return `#/book/${encodeURIComponent(route.bookId)}/chapters/${route.chapterNumber}`;
+    case "analytics": return `#/book/${encodeURIComponent(route.bookId)}/analytics`;
+    case "truth": return `#/book/${encodeURIComponent(route.bookId)}/truth`;
+    case "daemon": return "#/daemon";
+    case "logs": return "#/logs";
+    case "genres": return "#/genres";
+    case "style": return "#/style";
+    case "import": return "#/import";
+    case "radar": return "#/radar";
+    case "doctor": return "#/doctor";
     case "admin": return "#/admin";
     default: return "";
   }
@@ -57,7 +89,26 @@ function routeToHash(route: HashRoute): string {
 
 export { parseHash, routeToHash }; // for testing
 
-const HASH_PAGES = new Set(["dashboard", "chat", "book", "book-settings", "book-create", "services", "service-detail", "admin"]);
+const HASH_PAGES = new Set([
+  "dashboard",
+  "chat",
+  "book",
+  "book-settings",
+  "book-create",
+  "services",
+  "service-detail",
+  "chapter",
+  "analytics",
+  "truth",
+  "daemon",
+  "logs",
+  "genres",
+  "style",
+  "import",
+  "radar",
+  "doctor",
+  "admin",
+]);
 
 export function useHashRoute() {
   const [route, setRouteState] = useState<HashRoute>(() => parseHash(window.location.hash));
