@@ -7,10 +7,14 @@ import type { ContextCompressionCallback } from "../models/context-compression.j
 
 /** Files read in this order; anything else in story/ comes after, sorted alphabetically. */
 const PRIORITY_FILES = [
+  "outline/story_frame.md",
+  "outline/volume_map.md",
   "story_bible.md",
   "volume_outline.md",
   "book_rules.md",
+  "author_intent.md",
   "current_focus.md",
+  "current_state.md",
 ];
 
 const FULL_INLINE_CHAR_LIMIT = 6000;
@@ -126,19 +130,18 @@ function normalizeMarkdownHeading(line: string): string | null {
 }
 
 async function readTruthFiles(storyDir: string): Promise<TruthFileSection[]> {
-  let entries: string[];
+  let files: string[];
   try {
-    entries = await readdir(storyDir);
+    files = await listTruthMarkdownFiles(storyDir);
   } catch {
     return [];
   }
 
-  const mdFiles = entries.filter((f) => f.endsWith(".md"));
-  if (mdFiles.length === 0) return [];
+  if (files.length === 0) return [];
 
   const prioritySet = new Set(PRIORITY_FILES);
-  const prioritized = PRIORITY_FILES.filter((f) => mdFiles.includes(f));
-  const rest = mdFiles.filter((f) => !prioritySet.has(f)).sort();
+  const prioritized = PRIORITY_FILES.filter((f) => files.includes(f));
+  const rest = files.filter((f) => !prioritySet.has(f)).sort();
   const ordered = [...prioritized, ...rest];
 
   const sections: TruthFileSection[] = [];
@@ -151,4 +154,38 @@ async function readTruthFiles(storyDir: string): Promise<TruthFileSection[]> {
     }
   }
   return sections;
+}
+
+async function listTruthMarkdownFiles(storyDir: string): Promise<string[]> {
+  const topEntries = await readdir(storyDir, { withFileTypes: true });
+  const files = topEntries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => entry.name);
+
+  for (const dirName of ["outline", "roles"]) {
+    files.push(...await listNestedMarkdownFiles(storyDir, dirName));
+  }
+
+  return files;
+}
+
+async function listNestedMarkdownFiles(storyDir: string, relativeDir: string): Promise<string[]> {
+  const dirPath = join(storyDir, relativeDir);
+  let entries;
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const child = `${relativeDir}/${entry.name}`;
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      files.push(child);
+    } else if (entry.isDirectory()) {
+      files.push(...await listNestedMarkdownFiles(storyDir, child));
+    }
+  }
+  return files;
 }

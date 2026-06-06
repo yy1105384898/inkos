@@ -1042,7 +1042,7 @@ export function createPlayStepTool(
 
 const WriteTruthFileParams = Type.Object({
   bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
-  fileName: Type.String({ description: "Truth file name under story/, e.g. story_bible.md or current_focus.md." }),
+  fileName: Type.String({ description: "Truth file path under story/. Prefer outline/story_frame.md, outline/volume_map.md, roles/major/<name>.md, roles/minor/<name>.md; flat files such as current_focus.md and author_intent.md are also supported." }),
   content: Type.String({ description: "Full replacement content for the truth file." }),
 });
 
@@ -1198,7 +1198,7 @@ export function createEditTool(projectRoot: string): AgentTool<typeof EditParams
     description:
       "Edit a file under books/ via exact string replacement. " +
       "old_string must appear exactly once in the file. " +
-      "For chapter text use patch_chapter_text; for canonical truth files (story_bible/volume_outline/book_rules/current_focus) prefer write_truth_file; " +
+      "For chapter text use patch_chapter_text; for canonical truth files (outline/story_frame.md, outline/volume_map.md, roles/**/*.md, current_focus.md, author_intent.md) prefer write_truth_file; " +
       "to rewrite or polish a whole chapter call sub_agent with agent=\"reviser\".",
     label: "Edit File",
     parameters: EditParams,

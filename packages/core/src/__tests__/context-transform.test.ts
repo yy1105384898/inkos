@@ -160,4 +160,22 @@ describe("createBookContextTransform", () => {
     expect(injected.content).not.toContain("旧的条目式格式");
     expect(injected.content).not.toContain("revise: true");
   });
+
+  it("injects authoritative new-layout outline files into active-book chat context", async () => {
+    const outlineDir = join(projectRoot, "books", bookId, "story", "outline");
+    await mkdir(outlineDir, { recursive: true });
+    await writeFile(join(outlineDir, "story_frame.md"), "## 故事基石\n主角以第一人称调查物业黑账。");
+    await writeFile(join(outlineDir, "volume_map.md"), "## 第一卷\n暴雨夜发现电表账单异常。");
+
+    const transform = createBookContextTransform(bookId, projectRoot);
+    const result = await transform([
+      { role: "user" as const, content: "继续讨论第一章", timestamp: Date.now() },
+    ]);
+
+    const injected = result[0] as { role: string; content: string };
+    expect(injected.content).toContain("outline/story_frame.md");
+    expect(injected.content).toContain("主角以第一人称调查物业黑账。");
+    expect(injected.content).toContain("outline/volume_map.md");
+    expect(injected.content).toContain("暴雨夜发现电表账单异常。");
+  });
 });
