@@ -40,7 +40,7 @@ export interface ServiceStore {
   refreshServices: () => Promise<void>;
   fetchBankModels: () => Promise<void>;
   fetchCustomModels: () => Promise<void>;
-  fetchLiveModels: (service: string) => Promise<void>;
+  fetchLiveModels: (service: string, options?: { readonly refresh?: boolean }) => Promise<void>;
 
   setLiveModels: (service: string, models: ReadonlyArray<ModelInfo>) => void;
   clearModels: (service: string) => void;

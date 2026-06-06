@@ -101,20 +101,19 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const liveModelsLoading = useServiceStore((s) => s.liveModelsLoading);
   const modelsByService = useServiceStore((s) => s.modelsByService);
   const fetchServices = useServiceStore((s) => s.fetchServices);
+  const fetchBankModels = useServiceStore((s) => s.fetchBankModels);
   const fetchLiveModels = useServiceStore((s) => s.fetchLiveModels);
   const [configuredModelSelection, setConfiguredModelSelection] = useState<ChatPageModelPreference | null>(null);
   const [serviceConfigLoaded, setServiceConfigLoaded] = useState(false);
 
-  useEffect(() => { void fetchServices(); }, [fetchServices]);
+  useEffect(() => {
+    void fetchServices();
+    void fetchBankModels();
+  }, [fetchBankModels, fetchServices]);
   const connectedServices = useMemo(
     () => services.filter((s) => s.connected),
     [services],
   );
-  useEffect(() => {
-    for (const svc of connectedServices) {
-      void fetchLiveModels(svc.service);
-    }
-  }, [connectedServices, fetchLiveModels]);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -130,6 +129,11 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     })();
     return () => { cancelled = true; };
   }, []);
+  useEffect(() => {
+    if (!serviceConfigLoaded) return;
+    const service = configuredModelSelection?.service ?? selectedService ?? connectedServices[0]?.service;
+    if (service) void fetchLiveModels(service);
+  }, [configuredModelSelection, connectedServices, fetchLiveModels, selectedService, serviceConfigLoaded]);
 
   const modelPickerStatus = useMemo(() => {
     if (servicesLoading || services.length === 0) return "loading" as const;
@@ -418,7 +422,14 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                   <span className="text-xs text-muted-foreground/40 animate-pulse">加载模型...</span>
                 ) : modelPickerStatus === "ready" ? (
                   <DropdownMenu>
-                    <DropdownMenuTrigger className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted text-sm transition-colors cursor-pointer">
+                    <DropdownMenuTrigger
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-muted text-sm transition-colors cursor-pointer"
+                      onClick={() => {
+                        for (const svc of connectedServices) {
+                          void fetchLiveModels(svc.service);
+                        }
+                      }}
+                    >
                       <span className="font-medium text-xs truncate max-w-[220px]">
                         {selectedModelLabel}
                       </span>
