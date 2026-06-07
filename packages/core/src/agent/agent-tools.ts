@@ -446,6 +446,28 @@ const SubAgentParams = Type.Object({
 
 type SubAgentParamsType = Static<typeof SubAgentParams>;
 
+const ArchitectCreateSubAgentParams = Type.Object({
+  agent: Type.Literal("architect"),
+  instruction: Type.String({ description: "Confirmed self-contained book-creation instruction for the architect." }),
+  bookId: Type.Optional(Type.String({
+    description: "Optional new book ID. Usually omit it and let InkOS derive the ID from title.",
+  })),
+  title: Type.Optional(Type.String({ description: "Confirmed book title. Required when creating a book." })),
+  genre: Type.Optional(Type.String({ description: "Confirmed book genre." })),
+  platform: Type.Optional(Type.Union([
+    Type.Literal("tomato"),
+    Type.Literal("qidian"),
+    Type.Literal("feilu"),
+    Type.Literal("other"),
+  ], { description: "Confirmed target platform. Default: other" })),
+  language: Type.Optional(Type.Union([
+    Type.Literal("zh"),
+    Type.Literal("en"),
+  ], { description: "Confirmed writing language. Default: zh" })),
+  targetChapters: Type.Optional(Type.Number({ description: "Confirmed total chapter count. Default: 200" })),
+  chapterWordCount: Type.Optional(Type.Number({ description: "Confirmed per-chapter length in the book's native unit. Default: 3000 zh, 2000 en" })),
+});
+
 function prepareSubAgentArguments(args: unknown): SubAgentParamsType {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return args as SubAgentParamsType;
@@ -467,16 +489,17 @@ export function createSubAgentTool(
   pipeline: PipelineRunner,
   activeBookId: string | null,
   projectRoot?: string,
-  options: { readonly actionPayload?: ActionPayload } = {},
-): AgentTool<typeof SubAgentParams> {
+  options: { readonly actionPayload?: ActionPayload; readonly architectCreateOnly?: boolean } = {},
+): AgentTool<any> {
   return {
     name: "sub_agent",
-    description:
-      "Delegate a heavy operation to a specialised sub-agent. " +
-      "Use agent='architect' to initialise a new book, 'writer' to write the next chapter, " +
-      "'auditor' to audit quality, 'reviser' to revise a chapter, 'exporter' to export.",
+    description: options.architectCreateOnly
+      ? "Create a new long-form InkOS book foundation. This confirmation turn can only call agent='architect'; writing chapters happens after the session is bound to the created book."
+      : "Delegate a heavy operation to a specialised sub-agent. " +
+        "Use agent='architect' to initialise a new book, 'writer' to write the next chapter, " +
+        "'auditor' to audit quality, 'reviser' to revise a chapter, 'exporter' to export.",
     label: "Sub-Agent",
-    parameters: SubAgentParams,
+    parameters: options.architectCreateOnly ? ArchitectCreateSubAgentParams : SubAgentParams,
     prepareArguments: prepareSubAgentArguments,
     async execute(
       _toolCallId: string,
@@ -491,6 +514,9 @@ export function createSubAgentTool(
       };
 
       try {
+        if (options.architectCreateOnly && agent !== "architect") {
+          throw new Error("This confirmed book-creation turn can only run the architect. Open the created book or use the book session to write chapters.");
+        }
         if (!activeBookId && agent !== "architect") {
           return textResult("No active book. Only the architect agent can create a book from this session.");
         }

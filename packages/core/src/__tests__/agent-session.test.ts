@@ -658,6 +658,36 @@ describe("runAgentSession cache — bookId switch", () => {
     );
   });
 
+  it("exposes only architect in confirmed no-book creation sessions", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {
+      initBook: vi.fn(async () => undefined),
+    } as any;
+
+    await runAgentSession(
+      {
+        sessionId: "book-create-architect-only-session",
+        bookId: null,
+        sessionKind: "book-create",
+        actionSource: "button",
+        requestedIntent: "create_book",
+        language: "zh",
+        pipeline,
+        projectRoot,
+        model,
+      },
+      "确认创建一本书，建书后再写第一章。",
+    );
+
+    const subAgent = agentInstances.at(-1).state.tools.find((tool: any) => tool.name === "sub_agent");
+    expect(subAgent).toBeTruthy();
+    expect(JSON.stringify(subAgent.parameters)).toContain('"const":"architect"');
+    expect(JSON.stringify(subAgent.parameters)).not.toContain('"writer"');
+    expect(JSON.stringify(subAgent.parameters)).not.toContain('"auditor"');
+    expect(JSON.stringify(subAgent.parameters)).not.toContain('"reviser"');
+    expect(JSON.stringify(subAgent.parameters)).not.toContain('"exporter"');
+  });
+
   it("treats successful production tool results as terminal for the current turn", async () => {
     const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
     const pipeline = {

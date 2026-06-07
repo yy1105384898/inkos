@@ -675,7 +675,10 @@ function createAgentToolsForMode(params: {
 
   if (params.sessionKind === "book-create" && !params.bookId) {
     if (isConfirmed("create_book")) {
-      return [subAgentTool];
+      return [createSubAgentTool(params.pipeline, params.bookId, params.projectRoot, {
+        actionPayload: params.actionPayload,
+        architectCreateOnly: true,
+      })];
     }
     return [proposalTool];
   }
