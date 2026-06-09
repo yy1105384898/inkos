@@ -129,3 +129,14 @@ export function shouldShowPlayChoicePanel(input: {
   if (input.choiceCount <= 0) return false;
   return input.choiceSetKey !== input.consumedChoiceKey;
 }
+
+export function isChatScrollNearBottom(input: {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+  readonly thresholdPx?: number;
+}): boolean {
+  const threshold = input.thresholdPx ?? 96;
+  const distanceFromBottom = input.scrollHeight - input.scrollTop - input.clientHeight;
+  return distanceFromBottom <= threshold;
+}

@@ -8,6 +8,7 @@ import {
   pickProjectChatSessionId,
   setBookCreateSessionId,
   setProjectChatSessionId,
+  isChatScrollNearBottom,
   shouldShowPlayChoicePanel,
 } from "./chat-page-state";
 
@@ -229,5 +230,16 @@ describe("shouldShowPlayChoicePanel", () => {
 
   it("shows choices again when a new tool result creates a new source key", () => {
     expect(shouldShowPlayChoicePanel({ playMode: "guided", choiceSetKey: "turn-2", consumedChoiceKey: "turn-1", choiceCount: 2 })).toBe(true);
+  });
+});
+
+describe("isChatScrollNearBottom", () => {
+  it("treats the bottom and near-bottom positions as pinned", () => {
+    expect(isChatScrollNearBottom({ scrollTop: 900, clientHeight: 300, scrollHeight: 1200 })).toBe(true);
+    expect(isChatScrollNearBottom({ scrollTop: 830, clientHeight: 300, scrollHeight: 1200 })).toBe(true);
+  });
+
+  it("does not treat a user reading older messages as pinned to the bottom", () => {
+    expect(isChatScrollNearBottom({ scrollTop: 500, clientHeight: 300, scrollHeight: 1200 })).toBe(false);
   });
 });

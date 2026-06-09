@@ -46,6 +46,7 @@ import {
   pickModelSelection,
   setBookCreateSessionId,
   setProjectChatSessionId,
+  isChatScrollNearBottom,
   shouldShowPlayChoicePanel,
 } from "./chat-page-state";
 
@@ -113,6 +114,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const autoScrollPinnedRef = useRef(true);
 
   const isZh = t("nav.connected") === "\u5DF2\u8FDE\u63A5";
   const hasBook = Boolean(activeBookId);
@@ -242,12 +244,17 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll only while the reader is already near the bottom. Play sessions
+  // update tool/image state frequently, so unconditional scrolling makes it
+  // impossible to read older turns.
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }
+    if (!scrollRef.current || !autoScrollPinnedRef.current) return;
+    scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    autoScrollPinnedRef.current = true;
+  }, [activeSessionId]);
 
   // Entering a book loads its latest session; book-create mode persists its orphan session in localStorage.
   useEffect(() => {
@@ -328,6 +335,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
 
   const onSend = (text: string) => {
     if (!activeSessionId) return;
+    autoScrollPinnedRef.current = true;
     void sendMessage(activeSessionId, text, {
       activeBookId,
       sessionKind: currentSessionKind,
@@ -337,6 +345,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
 
   const handleQuickAction = (command: string, requestedIntent?: "write_next") => {
     if (!activeSessionId) return;
+    autoScrollPinnedRef.current = true;
     void sendMessage(activeSessionId, command, {
       activeBookId,
       sessionKind: currentSessionKind,
@@ -361,6 +370,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       return;
     }
     if (details.sameSession && activeSessionId) {
+      autoScrollPinnedRef.current = true;
       await sendMessage(activeSessionId, details.instruction ?? "", {
         activeBookId,
         sessionKind: details.targetSessionKind,
@@ -372,6 +382,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       return;
     }
     const targetSessionId = await createSession(null, details.targetSessionKind, targetPlayMode);
+    autoScrollPinnedRef.current = true;
     await sendMessage(targetSessionId, details.instruction ?? "", {
       sessionKind: details.targetSessionKind,
       playMode: targetPlayMode,
@@ -384,6 +395,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const handleRejectProposedAction = async (details: ProposedActionDetails) => {
     markProposalResolved(details.execId, "rejected");
     if (!activeSessionId) return;
+    autoScrollPinnedRef.current = true;
     await sendMessage(activeSessionId, `取消这次操作：${details.title ?? details.instruction}`, {
       activeBookId,
       sessionKind: currentSessionKind,
@@ -455,6 +467,14 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       {/* Message scroll area */}
       <div
         ref={scrollRef}
+        onScroll={(event) => {
+          const target = event.currentTarget;
+          autoScrollPinnedRef.current = isChatScrollNearBottom({
+            scrollTop: target.scrollTop,
+            clientHeight: target.clientHeight,
+            scrollHeight: target.scrollHeight,
+          });
+        }}
         className={`chat-message-scroll flex-1 overflow-y-auto [scrollbar-gutter:stable] px-4 py-6 transition-[padding] duration-200 ${worldPanelInsetClass}`}
       >
         {needsPlayModeChoice ? (
@@ -616,6 +636,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
             onChoose={(action) => {
               if (!activeSessionId || !playChoiceSet) return;
               setConsumedPlayChoiceKey(playChoiceSet.key);
+              autoScrollPinnedRef.current = true;
               void sendMessage(activeSessionId, action, { activeBookId, sessionKind: "play", actionSource: "button" });
             }}
           />
