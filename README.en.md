@@ -453,6 +453,21 @@ Agent mode exposes tools according to the current session kind: book creation, c
 
 Studio's **Open World** and **Branching Interactive** entries launch interactive creation without first creating a book. Describe how the world runs, how time advances, whether characters act as agents, and how items/evidence matter. InkOS writes the result back to a local world state so the session can continue.
 
+## Studio Screenshots and Run Outputs
+
+<p align="center">
+  <img src="assets/studio-dashboard.png" width="760" alt="InkOS Studio creation entry screenshot">
+</p>
+
+<p align="center">
+  <img src="assets/inkos-short-demo-cover.png" width="230" alt="Short-fiction cover output">
+  <img src="assets/play-openworld-romance.png" width="230" alt="Romance interactive-world output">
+  <img src="assets/play-openworld-detective.png" width="230" alt="Detective interactive-world output">
+  <img src="assets/play-item-warcraft.png" width="230" alt="Interactive-world item image output">
+</p>
+
+The first image is a local Studio screenshot. The other images are real local outputs from InkOS Short and InkOS Play: mobile-first short-fiction covers, open-world scenes, detective evidence visuals, and item imagery.
+
 ## CLI Reference
 
 | Command | Description |
