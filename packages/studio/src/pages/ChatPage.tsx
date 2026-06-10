@@ -20,11 +20,11 @@ import { ChatMessage } from "../components/chat/ChatMessage";
 import { QuickActions } from "../components/chat/QuickActions";
 import { ToolExecutionSteps } from "../components/chat/ToolExecutionSteps";
 import {
-  Loader2,
   BotMessageSquare,
   ArrowUp,
   ChevronDown,
   Check,
+  Square,
 } from "lucide-react";
 import { Shimmer } from "../components/ai-elements/shimmer";
 import {
@@ -77,6 +77,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const createSession = useChatStore((s) => s.createSession);
   const loadSessionDetail = useChatStore((s) => s.loadSessionDetail);
   const activateSession = useChatStore((s) => s.activateSession);
+  const stopMessage = useChatStore((s) => s.stopMessage);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -259,6 +260,11 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     void sendMessage(activeSessionId, command, activeBookId ? { activeBookId } : undefined);
   };
 
+  const handleStop = () => {
+    if (!activeSessionId) return;
+    void stopMessage(activeSessionId);
+  };
+
   const emptyGuidance = isZh
     ? "\u544A\u8BC9\u6211\u4F60\u60F3\u5199\u4EC0\u4E48\u2014\u2014\u9898\u6750\u3001\u4E16\u754C\u89C2\u3001\u4E3B\u89D2\u3001\u6838\u5FC3\u51B2\u7A81"
     : "Tell me what you want to write \u2014 genre, world, protagonist, core conflict";
@@ -396,14 +402,27 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                   rows={1}
                   className="flex-1 bg-transparent text-sm leading-6 placeholder:text-muted-foreground/50 outline-none! border-none! ring-0! shadow-none focus:outline-none! focus:ring-0! focus:border-none! resize-none disabled:opacity-50 max-h-[200px] overflow-y-auto"
                 />
-                <button
-                  type="button"
-                  onClick={() => onSend(input)}
-                  disabled={!input.trim() || loading || !activeSessionId}
-                  className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-primary/20"
-                >
-                  {loading ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} strokeWidth={2.5} />}
-                </button>
+                {loading ? (
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    disabled={!activeSessionId}
+                    title={isZh ? "停止生成" : "Stop generation"}
+                    aria-label={isZh ? "停止生成" : "Stop generation"}
+                    className="w-8 h-8 rounded-lg bg-destructive text-destructive-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-destructive/20"
+                  >
+                    <Square size={13} fill="currentColor" strokeWidth={2.5} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onSend(input)}
+                    disabled={!input.trim() || !activeSessionId}
+                    className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-primary/20"
+                  >
+                    <ArrowUp size={14} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2 px-3 pb-2 border-t border-border/20 pt-1.5">
                 {modelPickerStatus === "loading" ? (

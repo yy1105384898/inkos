@@ -24,7 +24,9 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
-  Save
+  Save,
+  Hand,
+  Settings2
 } from "lucide-react";
 
 interface ChapterMeta {
@@ -80,6 +82,8 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = 
   imported: { color: "text-blue-500 bg-blue-500/10", icon: <Download size={12} /> },
 };
 
+const ACTIVITY_STALE_MS = 20 * 60 * 1000;
+
 export function BookDetail({
   bookId,
   nav,
@@ -108,10 +112,32 @@ export function BookDetail({
   const [settingsStatus, setSettingsStatus] = useState<BookStatus | null>(null);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("txt");
   const [exportApprovedOnly, setExportApprovedOnly] = useState(false);
+  const [reviewMode, setReviewMode] = useState<"auto" | "manual">("auto");
+  const [now, setNow] = useState(() => Date.now());
   const activity = useMemo(() => deriveBookActivity(sse.messages, bookId), [bookId, sse.messages]);
-  const writing = writeRequestPending || activity.writing;
-  const drafting = draftRequestPending || activity.drafting;
+  const activityStale = activity.lastActiveAt !== null && now - activity.lastActiveAt > ACTIVITY_STALE_MS;
+  const writing = writeRequestPending || (activity.writing && !activityStale);
+  const drafting = draftRequestPending || (activity.drafting && !activityStale);
   const latestPersistedChapter = data ? data.nextChapter - 1 : 0;
+
+  useEffect(() => {
+    void fetchJson<{ mode?: string }>("/project/chapter-review-mode")
+      .then((result) => setReviewMode(result.mode === "manual" ? "manual" : "auto"))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!activity.writing && !activity.drafting) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [activity.drafting, activity.writing]);
+
+  useEffect(() => {
+    if (!activityStale) return;
+    setWriteRequestPending(false);
+    setDraftRequestPending(false);
+    refetch();
+  }, [activityStale, refetch]);
 
   useEffect(() => {
     const recent = sse.messages.at(-1);
@@ -154,6 +180,22 @@ export function BookDetail({
     } catch (e) {
       setDraftRequestPending(false);
       alert(e instanceof Error ? e.message : "Failed");
+    }
+  };
+
+  const handleToggleReviewMode = async () => {
+    const previous = reviewMode;
+    const next = previous === "manual" ? "auto" : "manual";
+    setReviewMode(next);
+    try {
+      await fetchJson("/project/chapter-review-mode", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: next }),
+      });
+    } catch (e) {
+      setReviewMode(previous);
+      alert(e instanceof Error ? e.message : "Save failed");
     }
   };
 
@@ -364,6 +406,16 @@ export function BookDetail({
             {drafting ? t("book.drafting") : t("book.draftOnly")}
           </button>
           <button
+            onClick={handleToggleReviewMode}
+            title={reviewMode === "manual"
+              ? "手动审查：写完即停，由你点审计/修订/通过。点此切回自动。"
+              : "自动审查：写完自动审校并按需重写。点此切到手动。"}
+            className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium bg-secondary/60 text-foreground rounded-xl border border-border/50 hover:bg-secondary transition-all"
+          >
+            {reviewMode === "manual" ? <Hand size={16} /> : <Settings2 size={16} />}
+            {reviewMode === "manual" ? "审查：手动·写完即停" : "审查：自动"}
+          </button>
+          <button
             onClick={() => setConfirmDeleteOpen(true)}
             disabled={deleting}
             className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold bg-destructive/10 text-destructive rounded-xl hover:bg-destructive hover:text-white transition-all border border-destructive/20 disabled:opacity-50"
@@ -382,7 +434,9 @@ export function BookDetail({
               : "border-primary/20 bg-primary/[0.04] text-foreground"
           }`}
         >
-          {activity.lastError ? (
+          {activityStale && !activity.lastError ? (
+            <span>上次写作状态超过 20 分钟没有收到完成事件，页面已自动解锁。可刷新或重新点击写作。</span>
+          ) : activity.lastError ? (
             <span>
               {t("book.pipelineFailed")}: {activity.lastError}
             </span>

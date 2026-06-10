@@ -1502,6 +1502,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       defaultLLMConfig: effectiveLlmConfig,
       foundationReviewRetries: currentConfig.foundation?.reviewRetries ?? 2,
       writingReviewRetries: currentConfig.writing?.reviewRetries ?? 1,
+      chapterReviewMode: currentConfig.writing?.reviewMode ?? "auto",
       modelOverrides: currentConfig.modelOverrides,
       notifyChannels: currentConfig.notify,
       logger,
@@ -2415,6 +2416,24 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     } catch (e) {
       return c.json({ error: String(e) }, 500);
     }
+  });
+
+  app.get("/api/v1/project/chapter-review-mode", async (c) => {
+    const config = await loadCurrentProjectConfig({ requireApiKey: false });
+    return c.json({ mode: config.writing?.reviewMode ?? "auto" });
+  });
+
+  app.put("/api/v1/project/chapter-review-mode", async (c) => {
+    const body = await c.req.json<{ mode?: unknown }>().catch(() => ({ mode: undefined }));
+    const mode = body.mode === "manual" ? "manual" : "auto";
+    const config = await loadRawConfig(root);
+    const writing = config.writing && typeof config.writing === "object"
+      ? config.writing as Record<string, unknown>
+      : {};
+    config.writing = { ...writing, reviewMode: mode };
+    await saveRawConfig(root, config);
+    await loadCurrentProjectConfig({ requireApiKey: false }).catch(() => undefined);
+    return c.json({ ok: true, mode });
   });
 
   // --- Truth files browser ---

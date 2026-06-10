@@ -41,6 +41,7 @@ export interface BookActivity {
   readonly writing: boolean;
   readonly drafting: boolean;
   readonly lastError: string | null;
+  readonly lastActiveAt: number | null;
 }
 
 export interface SidebarBookSummary {
@@ -103,11 +104,15 @@ export function deriveBookActivity(messages: ReadonlyArray<SSEMessage>, bookId: 
   let writing = false;
   let drafting = false;
   let lastError: string | null = null;
+  let lastActiveAt: number | null = null;
 
   for (const message of messages) {
     if (getBookId(message) !== bookId) continue;
 
     const data = message.data as { error?: unknown } | null;
+    if (START_EVENTS.has(message.event) || TERMINAL_EVENTS.has(message.event)) {
+      lastActiveAt = message.timestamp;
+    }
 
     switch (message.event) {
       case "write:start":
@@ -139,7 +144,7 @@ export function deriveBookActivity(messages: ReadonlyArray<SSEMessage>, bookId: 
     }
   }
 
-  return { writing, drafting, lastError };
+  return { writing, drafting, lastError, lastActiveAt };
 }
 
 export function shouldRefetchBookView(message: SSEMessage, bookId: string): boolean {

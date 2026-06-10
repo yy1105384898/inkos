@@ -503,6 +503,6 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         messages: runtime ? settleStreamingMessage(runtime.messages, "Stopped") : undefined,
       })),
     }));
-    await fetchJson(`/sessions/${sessionId}/stop`, { method: "POST" }).catch(() => undefined);
+    await fetchJson(`/agent/${sessionId}/stop`, { method: "POST" }).catch(() => undefined);
   },
 });

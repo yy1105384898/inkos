@@ -9,7 +9,10 @@ const { fetchJson } = vi.hoisted(() => ({
   fetchJson: vi.fn(),
 }));
 
-vi.mock("../../../../hooks/use-api", () => ({ fetchJson }));
+vi.mock("../../../../hooks/use-api", () => ({
+  buildApiUrl: (path: string) => `/api/v1${path}`,
+  fetchJson,
+}));
 
 class FakeEventSource {
   readonly url: string;
@@ -63,6 +66,56 @@ describe("chat message actions", () => {
 
     expect(store.getState().sessions[sessionId]?.playMode).toBe("guided");
     expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("stops the agent run through the active stop endpoint", async () => {
+    const store = createTestStore();
+    const sessionId = store.getState().createDraftSession(null, "book-create");
+    store.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [sessionId]: {
+          ...state.sessions[sessionId]!,
+          isStreaming: true,
+          messages: [
+            {
+              role: "assistant",
+              content: "",
+              timestamp: 1,
+              parts: [
+                {
+                  type: "tool",
+                  execution: {
+                    id: "writer-1",
+                    tool: "sub_agent",
+                    agent: "writer",
+                    label: "写作",
+                    status: "running",
+                    startedAt: 1,
+                  },
+                },
+              ],
+              toolExecutions: [
+                {
+                  id: "writer-1",
+                  tool: "sub_agent",
+                  agent: "writer",
+                  label: "写作",
+                  status: "running",
+                  startedAt: 1,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    }));
+
+    await store.getState().stopMessage(sessionId);
+
+    expect(fetchJson).toHaveBeenCalledWith(`/agent/${sessionId}/stop`, { method: "POST" });
+    expect(store.getState().sessions[sessionId]?.isStreaming).toBe(false);
+    expect(store.getState().sessions[sessionId]?.messages[0]?.toolExecutions?.[0]?.status).toBe("error");
   });
 
   it("syncs the created book id returned by /agent back into the current runtime session", async () => {
