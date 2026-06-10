@@ -936,6 +936,53 @@ async function resolveConfiguredServiceEntry(root: string, serviceId: string): P
   }
 }
 
+async function resolveStudioDoctorLlmConfig(
+  root: string,
+  fallbackConfig: ProjectConfig,
+): Promise<{
+  service: string;
+  apiKey: string;
+  baseUrl: string;
+  apiFormat?: "chat" | "responses";
+  stream?: boolean;
+  model?: string;
+  proxyUrl?: string;
+}> {
+  const rawConfig = await loadRawConfig(root).catch(() => ({} as Record<string, unknown>));
+  const llm = (rawConfig.llm as Record<string, unknown> | undefined) ?? {};
+  const services = normalizeServiceConfig(llm.services);
+  const selectedServiceFromStudio =
+    typeof llm.service === "string" && llm.service.trim()
+      ? llm.service.trim()
+      : services[0]
+        ? serviceConfigKey(services[0])
+        : undefined;
+  const selectedService = selectedServiceFromStudio ?? fallbackConfig.llm.service ?? fallbackConfig.llm.provider;
+  const selectedEntry = services.find((entry) => serviceConfigKey(entry) === selectedService);
+  const baseUrl =
+    selectedServiceFromStudio
+      ? await resolveConfiguredServiceBaseUrl(root, selectedService, selectedEntry?.baseUrl) ?? fallbackConfig.llm.baseUrl
+      : fallbackConfig.llm.baseUrl;
+  const secrets = await loadSecrets(root).catch(() => ({
+    services: {} as Record<string, { apiKey: string }>,
+  }));
+  const apiKey = secrets.services[selectedService]?.apiKey ?? fallbackConfig.llm.apiKey;
+  const model =
+    typeof llm.defaultModel === "string" && llm.defaultModel.trim()
+      ? llm.defaultModel.trim()
+      : fallbackConfig.llm.model;
+
+  return {
+    service: selectedService,
+    apiKey,
+    baseUrl,
+    apiFormat: selectedEntry?.apiFormat ?? fallbackConfig.llm.apiFormat,
+    stream: selectedEntry?.stream ?? fallbackConfig.llm.stream,
+    model,
+    proxyUrl: typeof llm.proxyUrl === "string" ? llm.proxyUrl : fallbackConfig.llm.proxyUrl,
+  };
+}
+
 function buildProbePlans(
   preferredApiFormat: "chat" | "responses" | undefined,
   preferredStream: boolean | undefined,
@@ -3910,16 +3957,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
     try {
       const currentConfig = await loadCurrentProjectConfig({ requireApiKey: false });
-      const service = currentConfig.llm.service ?? currentConfig.llm.provider;
+      const studioLlm = await resolveStudioDoctorLlmConfig(root, currentConfig);
       const probe = await probeServiceCapabilities({
         root,
-        service,
-        apiKey: currentConfig.llm.apiKey,
-        baseUrl: currentConfig.llm.baseUrl,
-        preferredApiFormat: currentConfig.llm.apiFormat,
-        preferredStream: currentConfig.llm.stream,
-        preferredModel: currentConfig.llm.model,
-        proxyUrl: currentConfig.llm.proxyUrl,
+        service: studioLlm.service,
+        apiKey: studioLlm.apiKey,
+        baseUrl: studioLlm.baseUrl,
+        preferredApiFormat: studioLlm.apiFormat,
+        preferredStream: studioLlm.stream,
+        preferredModel: studioLlm.model,
+        proxyUrl: studioLlm.proxyUrl,
       });
       checks.llmConnected = probe.ok;
     } catch { /* ignore */ }

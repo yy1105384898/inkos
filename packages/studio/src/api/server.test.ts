@@ -610,6 +610,47 @@ describe("createStudioServer daemon lifecycle", () => {
     );
   });
 
+  it("uses saved Studio service config and user secret for doctor checks", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        provider: "openai",
+        service: "yynewapi",
+        configSource: "studio",
+        baseUrl: "https://stale.example.com/v1",
+        model: "stale-model",
+        services: [
+          { service: "yynewapi", apiFormat: "chat", stream: true },
+        ],
+        defaultModel: "gpt-5.4",
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        yynewapi: { apiKey: "sk-user-yynewapi" },
+      },
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/doctor");
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://yynewapi.yangyangnj.top/v1/models",
+      expect.objectContaining({ headers: { Authorization: "Bearer sk-user-yynewapi" } }),
+    );
+    expect(createLLMClientMock).not.toHaveBeenCalled();
+  });
+
   it("auto-falls back to a non-stream probe in doctor checks when the first transport returns empty", async () => {
     const freshConfig = {
       ...cloneProjectConfig(),
