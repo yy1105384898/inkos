@@ -8,6 +8,11 @@ export {
   createPatchChapterTextTool,
   createEditTool,
   createWriteFileTool,
+  createShortFictionRunTool,
+  createGenerateCoverTool,
+  createPlayStartTool,
+  createPlayReviseTool,
+  createPlayStepTool,
   createGrepTool,
   createLsTool,
 } from "./agent-tools.js";

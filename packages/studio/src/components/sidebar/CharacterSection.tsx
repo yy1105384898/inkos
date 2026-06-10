@@ -4,6 +4,7 @@ import { useChatStore } from "../../store/chat";
 import { fetchJson } from "../../hooks/use-api";
 import { SidebarCard } from "./SidebarCard";
 import { cn } from "../../lib/utils";
+import { roleFromPath, type RoleRef } from "../../lib/truth-display";
 
 interface CharacterInfo {
   name: string;
@@ -51,6 +52,32 @@ function getRoleColor(role: string): string {
   return "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400";
 }
 
+const TIER_BADGE: Record<RoleRef["tier"], { label: string; color: string }> = {
+  major: { label: "主要", color: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+  minor: { label: "次要", color: "bg-blue-500/15 text-blue-600 dark:text-blue-400" },
+};
+
+// Phase 5 layout: one file per character under roles/. Each entry opens the
+// full (humanized) character sheet — no raw matrix parsing needed.
+function RoleEntry({ role }: { readonly role: RoleRef }) {
+  const openArtifact = useChatStore((s) => s.openArtifact);
+  const badge = TIER_BADGE[role.tier];
+  return (
+    <button
+      onClick={() => openArtifact(role.path)}
+      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-secondary/30 hover:bg-secondary/50 transition-colors text-left"
+    >
+      <Users size={16} className="shrink-0 text-muted-foreground/60" />
+      <span className="text-[15px] leading-6 font-medium text-foreground font-['SimSun','Songti_SC','STSong',serif] flex-1 truncate">
+        {role.name}
+      </span>
+      <span className={cn("text-[12px] px-1.5 py-0.5 rounded-full shrink-0", badge.color)}>
+        {badge.label}
+      </span>
+    </button>
+  );
+}
+
 function CharacterCard({ char }: { readonly char: CharacterInfo }) {
   const [expanded, setExpanded] = useState(false);
   const role = char.fields["定位"] ?? char.fields["Role"] ?? "";
@@ -63,29 +90,29 @@ function CharacterCard({ char }: { readonly char: CharacterInfo }) {
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-2.5 py-2 text-left"
       >
-        <Users size={14} className="shrink-0 text-muted-foreground/60" />
-        <span className="text-sm font-medium text-foreground font-['SimSun','Songti_SC','STSong',serif] flex-1 truncate">
+        <Users size={16} className="shrink-0 text-muted-foreground/60" />
+        <span className="text-[15px] leading-6 font-medium text-foreground font-['SimSun','Songti_SC','STSong',serif] flex-1 truncate">
           {char.name}
         </span>
         {role && (
-          <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full shrink-0", getRoleColor(role))}>
+          <span className={cn("text-[12px] px-1.5 py-0.5 rounded-full shrink-0", getRoleColor(role))}>
             {role.split("/")[0].trim()}
           </span>
         )}
-        <ChevronDown size={12} className={cn("text-muted-foreground/50 transition-transform shrink-0", expanded && "rotate-180")} />
+        <ChevronDown size={14} className={cn("text-muted-foreground/50 transition-transform shrink-0", expanded && "rotate-180")} />
       </button>
       {expanded && (
         <div className="px-2.5 pb-2.5 space-y-1">
           {tags && (
-            <p className="text-xs text-muted-foreground"><span className="text-muted-foreground/60">标签</span> {tags}</p>
+            <p className="text-[14px] leading-6 text-muted-foreground"><span className="text-muted-foreground/60">标签</span> {tags}</p>
           )}
           {current && (
-            <p className="text-xs text-muted-foreground"><span className="text-muted-foreground/60">当前</span> {current}</p>
+            <p className="text-[14px] leading-6 text-muted-foreground"><span className="text-muted-foreground/60">当前</span> {current}</p>
           )}
           {Object.entries(char.fields)
             .filter(([k]) => !["定位", "Role", "标签", "Tags", "当前", "Current"].includes(k))
             .map(([key, val]) => (
-              <p key={key} className="text-xs text-muted-foreground">
+              <p key={key} className="text-[14px] leading-6 text-muted-foreground">
                 <span className="text-muted-foreground/60">{key}</span> {val}
               </p>
             ))}
@@ -100,29 +127,59 @@ interface CharacterSectionProps {
 }
 
 export function CharacterSection({ bookId }: CharacterSectionProps) {
-  const [characters, setCharacters] = useState<CharacterInfo[]>([]);
+  const [roles, setRoles] = useState<ReadonlyArray<RoleRef>>([]);
+  const [legacyChars, setLegacyChars] = useState<CharacterInfo[]>([]);
   const bookDataVersion = useChatStore((s) => s.bookDataVersion);
 
   useEffect(() => {
-    fetchJson<{ content: string | null }>(`/books/${bookId}/truth/character_matrix.md`)
-      .then((data) => {
-        if (data.content) {
-          setCharacters(parseCharacterMatrix(data.content));
-        } else {
-          setCharacters([]);
+    let cancelled = false;
+    setRoles([]);
+    setLegacyChars([]);
+
+    fetchJson<{ files: ReadonlyArray<{ name: string }> }>(`/books/${bookId}/truth`)
+      .then(async (data) => {
+        if (cancelled) return;
+        const roleRefs = data.files
+          .map((f) => roleFromPath(f.name))
+          .filter((r): r is RoleRef => r !== null)
+          .sort((a, b) =>
+            a.tier === b.tier ? a.name.localeCompare(b.name) : a.tier === "major" ? -1 : 1,
+          );
+
+        // Phase 5 books expose one file per character under roles/.
+        if (roleRefs.length > 0) {
+          setRoles(roleRefs);
+          return;
+        }
+
+        // Pre-Phase-5 books only have the flat character_matrix.md table.
+        const matrix = await fetchJson<{ content: string | null }>(
+          `/books/${bookId}/truth/character_matrix.md`,
+        ).catch(() => ({ content: null }));
+        if (!cancelled && matrix.content) {
+          setLegacyChars(parseCharacterMatrix(matrix.content));
         }
       })
-      .catch(() => setCharacters([]));
+      .catch(() => {
+        if (!cancelled) {
+          setRoles([]);
+          setLegacyChars([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [bookId, bookDataVersion]);
 
-  if (characters.length === 0) return null;
+  if (roles.length === 0 && legacyChars.length === 0) return null;
 
   return (
     <SidebarCard title="角色">
       <div className="space-y-1.5">
-        {characters.map((char) => (
-          <CharacterCard key={char.name} char={char} />
-        ))}
+        {roles.length > 0
+          ? roles.map((role) => <RoleEntry key={role.path} role={role} />)
+          : legacyChars.map((char) => <CharacterCard key={char.name} char={char} />)}
       </div>
     </SidebarCard>
   );

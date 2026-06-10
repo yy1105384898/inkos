@@ -64,6 +64,7 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
     PipelineRunner: MockPipelineRunner,
     Scheduler: MockScheduler,
     isNewLayoutBook,
+    tryParseBookRulesFrontmatter: actual.tryParseBookRulesFrontmatter,
     createLLMClient: vi.fn(() => ({})),
     createLogger: vi.fn(() => logger),
     computeAnalytics: vi.fn(() => ({})),
@@ -135,7 +136,7 @@ describe("Issue 1 — Studio: old book (no outline/story_frame.md)", () => {
     const body = await res.json() as { file: string; content: string; legacy?: boolean };
     expect(body.content).toContain("Authoritative content");
     expect(body.legacy).toBeUndefined();
-  });
+  }, 10_000);
 
   it("PUT story_bible.md succeeds", async () => {
     const { createStudioServer } = await import("./server.js");

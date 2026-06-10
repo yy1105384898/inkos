@@ -251,12 +251,12 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
 
   const onSend = (text: string) => {
     if (!activeSessionId) return;
-    void sendMessage(activeSessionId, text, activeBookId);
+    void sendMessage(activeSessionId, text, activeBookId ? { activeBookId } : undefined);
   };
 
   const handleQuickAction = (command: string) => {
     if (!activeSessionId) return;
-    void sendMessage(activeSessionId, command, activeBookId);
+    void sendMessage(activeSessionId, command, activeBookId ? { activeBookId } : undefined);
   };
 
   const emptyGuidance = isZh

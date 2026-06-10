@@ -48,7 +48,7 @@ import {
   renderNarrativeSelectedContext,
   sanitizeNarrativeEvidenceBlock,
 } from "../utils/narrative-control.js";
-import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 const LEGACY_WRITER_CONTEXT_BUDGET = {
@@ -702,6 +702,12 @@ export class WriterAgent extends BaseAgent {
 
     const paddedNum = String(output.chapterNumber).padStart(4, "0");
     const filename = `${paddedNum}_${this.sanitizeFilename(output.title)}.md`;
+    const existingChapterFiles = await readdir(chaptersDir).catch(() => []);
+    await Promise.all(
+      existingChapterFiles
+        .filter((file) => file.startsWith(`${paddedNum}_`) && file.endsWith(".md") && file !== filename)
+        .map((file) => rm(join(chaptersDir, file), { force: true })),
+    );
 
     const heading = language === "en"
       ? `# Chapter ${output.chapterNumber}: ${output.title}`
@@ -874,10 +880,22 @@ ${lengthRequirementBlock}
     readonly selectedEvidenceBlock?: string;
   }): string {
     const language = params.language ?? "zh";
-    const contextSections = renderNarrativeSelectedContext(
-      params.contextPackage.selectedContext,
-      language,
+    // The user's steering docs (author_intent = long-term direction, current_focus =
+    // short-term focus) must land as a prominent, binding block near the top — not
+    // buried among generic "evidence" entries where the model treats them as optional.
+    const DIRECTION_SOURCES = new Set(["story/author_intent.md", "story/current_focus.md"]);
+    const directionEntries = params.contextPackage.selectedContext.filter((entry) =>
+      DIRECTION_SOURCES.has(entry.source),
     );
+    const otherEntries = params.contextPackage.selectedContext.filter((entry) =>
+      !DIRECTION_SOURCES.has(entry.source),
+    );
+    const contextSections = renderNarrativeSelectedContext(otherEntries, language);
+    const userDirectionBlock = directionEntries.length > 0
+      ? (language === "en"
+          ? `## User direction (overrides model defaults — must follow)\n${renderNarrativeSelectedContext(directionEntries, language)}\n`
+          : `## 用户方向（优先于模型默认，必须遵循）\n${renderNarrativeSelectedContext(directionEntries, language)}\n`)
+      : "";
 
     const diagnosticLines = params.ruleStack.sections.diagnostic.length > 0
       ? params.ruleStack.sections.diagnostic.join(", ")
@@ -898,6 +916,7 @@ ${lengthRequirementBlock}
 
 ${chapterContextBlock}
 
+${userDirectionBlock}
 ${briefNarrative}
 
 ## Selected Context
@@ -919,6 +938,7 @@ ${lengthRequirementBlock}
 
 ${chapterContextBlock}
 
+${userDirectionBlock}
 ${briefNarrative}
 
 ## 已选上下文
@@ -1038,10 +1058,18 @@ ${overrides}\n`;
       return;
     }
 
-    const missing: string[] = [];
-    if (!preWriteCheck.includes("当前任务")) missing.push("当前任务");
-    if (!preWriteCheck.includes("不要做")) missing.push("不要做");
-    if (!preWriteCheck.includes("章尾")) missing.push("章尾必须发生的改变");
+    const required = language === "en"
+      ? [
+          { needle: "Current task", label: "Current task" },
+          { needle: "Do not", label: "Do not" },
+          { needle: "end-of-chapter", label: "Required end-of-chapter change" },
+        ]
+      : [
+          { needle: "当前任务", label: "当前任务" },
+          { needle: "不要做", label: "不要做" },
+          { needle: "章尾", label: "章尾必须发生的改变" },
+        ];
+    const missing = required.filter((r) => !preWriteCheck.includes(r.needle)).map((r) => r.label);
 
     if (missing.length > 0) {
       this.logWarn(language, {

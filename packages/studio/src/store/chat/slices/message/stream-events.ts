@@ -1,5 +1,5 @@
 import type { StateCreator } from "zustand";
-import type { ChatStore, MessageActions, PipelineStage } from "../../types";
+import type { ChatStore, MessageActions, MessagePart, PipelineStage, ToolExecution } from "../../types";
 import { shouldRefreshSidebarForTool } from "../../message-policy";
 import {
   deriveFlat,
@@ -17,6 +17,20 @@ import {
 type SliceSet = Parameters<StateCreator<ChatStore, [], [], MessageActions>>[0];
 type SliceGet = Parameters<StateCreator<ChatStore, [], [], MessageActions>>[1];
 
+type ContextCompressionCategory = "session_context" | "story_context";
+type ContextCompressionPhase = "start" | "end" | "error";
+
+interface ContextCompressionEventPayload {
+  readonly sessionId?: string;
+  readonly category?: ContextCompressionCategory;
+  readonly phase?: ContextCompressionPhase;
+  readonly message?: string;
+  readonly protectedTokens?: number;
+  readonly compressibleTokens?: number;
+  readonly budgetTokens?: number;
+  readonly sources?: readonly string[];
+}
+
 interface AttachSessionStreamListenersInput {
   sessionId: string;
   streamTs: number;
@@ -32,25 +46,6 @@ export function attachSessionStreamListeners({
   set,
   get,
 }: AttachSessionStreamListenersInput): void {
-  const finishBackgroundStream = (event: MessageEvent) => {
-    try {
-      const data = event.data ? JSON.parse(event.data) : null;
-      if (!sessionMatchesEvent(sessionId, data)) return;
-      streamEs.close();
-      set((state) => ({
-        sessions: updateSession(state.sessions, sessionId, (runtime) => ({
-          isStreaming: false,
-          stream: runtime.stream === streamEs ? null : runtime.stream,
-        })),
-      }));
-    } catch {
-      // ignore
-    }
-  };
-
-  streamEs.addEventListener("agent:complete", finishBackgroundStream);
-  streamEs.addEventListener("agent:error", finishBackgroundStream);
-
   streamEs.addEventListener("thinking:start", (event: MessageEvent) => {
     try {
       const data = event.data ? JSON.parse(event.data) : null;
@@ -288,4 +283,110 @@ export function attachSessionStreamListeners({
       // ignore
     }
   });
+
+  streamEs.addEventListener("context:compression", (event: MessageEvent) => {
+    try {
+      const data = event.data ? JSON.parse(event.data) as ContextCompressionEventPayload : null;
+      if (!sessionMatchesEvent(sessionId, data) || !data?.category || !data.phase) return;
+      const category = data.category;
+      const phase = data.phase;
+      set((state) => ({
+        sessions: updateSession(state.sessions, sessionId, (runtime) => {
+          const [messages, stream] = getOrCreateStream(runtime.messages, streamTs);
+          const parts = [...(stream.parts ?? [])];
+          applyContextCompressionToParts(parts, category, phase, data);
+          const flat = deriveFlat(parts);
+          return { messages: replaceLast(messages, { ...stream, ...flat, parts }) };
+        }),
+      }));
+    } catch {
+      // ignore
+    }
+  });
+}
+
+function compressionLabel(category: ContextCompressionCategory): string {
+  return category === "session_context" ? "整理会话记忆" : "压缩故事上下文";
+}
+
+function compressionSourceSummary(sources: readonly string[] | undefined): string {
+  if (!sources || sources.length === 0) return "";
+  const preview = sources.slice(0, 3).join(", ");
+  const suffix = sources.length > 3 ? ` +${sources.length - 3}` : "";
+  return `来源 ${sources.length}: ${preview}${suffix}`;
+}
+
+function compressionProgress(data: ContextCompressionEventPayload): PipelineStage["progress"] | undefined {
+  if (data.phase !== "start") return undefined;
+  const parts = [
+    data.protectedTokens !== undefined ? `保护 ${data.protectedTokens}` : "",
+    data.compressibleTokens !== undefined ? `可压缩 ${data.compressibleTokens}` : "",
+    data.budgetTokens !== undefined ? `预算 ${data.budgetTokens}` : "",
+    compressionSourceSummary(data.sources),
+  ].filter(Boolean);
+  return {
+    status: parts.length > 0 ? parts.join(" · ") : "compressing",
+    elapsedMs: 0,
+    totalChars: 0,
+    chineseChars: 0,
+  };
+}
+
+function upsertCompressionStage(
+  stages: PipelineStage[] | undefined,
+  category: ContextCompressionCategory,
+  phase: ContextCompressionPhase,
+  data: ContextCompressionEventPayload,
+): PipelineStage[] {
+  const label = compressionLabel(category);
+  const found = stages?.some((stage) => stage.label === label) ?? false;
+  const base = found ? [...(stages ?? [])] : [...(stages ?? []), { label, status: "pending" as const }];
+  const status: PipelineStage["status"] = phase === "start" ? "active" : "completed";
+  return base.map((stage) =>
+    stage.label === label
+      ? { ...stage, status, progress: phase === "start" ? compressionProgress(data) : undefined }
+      : stage
+  );
+}
+
+function findRunningExecution(parts: MessagePart[]): ToolExecution | undefined {
+  const running = findRunningToolPart(parts);
+  return running?.execution;
+}
+
+function applyContextCompressionToParts(
+  parts: MessagePart[],
+  category: ContextCompressionCategory,
+  phase: ContextCompressionPhase,
+  data: ContextCompressionEventPayload,
+): void {
+  const running = category === "session_context" ? undefined : findRunningExecution(parts);
+  if (running) {
+    running.stages = upsertCompressionStage(running.stages, category, phase, data);
+    if (phase === "error") {
+      running.status = "error";
+      running.error = data.message ?? `${compressionLabel(category)}失败`;
+    }
+    return;
+  }
+
+  const id = `context-${category}`;
+  const existing = parts.find((part): part is { type: "tool"; execution: ToolExecution } =>
+    part.type === "tool" && part.execution.id === id
+  );
+  const status: ToolExecution["status"] = phase === "start" ? "running" : phase === "error" ? "error" : "completed";
+  const execution = existing?.execution ?? {
+    id,
+    tool: "context_compression",
+    label: compressionLabel(category),
+    status,
+    stages: [],
+    startedAt: Date.now(),
+  };
+  execution.status = status;
+  execution.label = compressionLabel(category);
+  execution.stages = upsertCompressionStage(execution.stages, category, phase, data);
+  if (phase !== "start") execution.completedAt = Date.now();
+  if (phase === "error") execution.error = data.message ?? `${compressionLabel(category)}失败`;
+  if (!existing) parts.push({ type: "tool", execution });
 }

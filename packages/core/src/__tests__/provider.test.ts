@@ -275,6 +275,27 @@ describe("chatCompletion via pi-ai", () => {
     expect(opts.maxTokens).toBe(512);
   });
 
+  it("rejects oversized chat context before sending to pi-ai", async () => {
+    const client = makeClient(0.7, {
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        contextWindow: 80,
+      },
+    });
+
+    const error = await captureError(
+      chatCompletion(client, "test-model", [
+        { role: "system", content: "系统设定".repeat(40) },
+        { role: "user", content: "用户消息".repeat(40) },
+      ], { maxTokens: 20 }),
+    );
+
+    expect(error.message).toContain("context window");
+    expect(error.message).toContain("compress");
+    expect(mockStreamSimple).not.toHaveBeenCalled();
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+  });
+
   it("calls onTextDelta for each text chunk", async () => {
     const msg = makeAssistantMessage("abc");
     mockStreamSimple.mockReturnValue(makeEventStream([

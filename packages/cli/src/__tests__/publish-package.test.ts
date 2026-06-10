@@ -33,7 +33,9 @@ function tarForceLocalArgs(): string[] {
 
 async function packPackage(packageDir: string, packDir: string) {
   const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-  execFileSync(npmCmd, ["pack", "--pack-destination", packDir], {
+  const cacheDir = join(packDir, ".npm-cache");
+  await mkdir(cacheDir, { recursive: true });
+  execFileSync(npmCmd, ["pack", "--pack-destination", packDir, "--cache", cacheDir], {
     cwd: packageDir,
     env: process.env,
     encoding: "utf-8",

@@ -16,6 +16,7 @@ export interface ChatPageModelPreference {
 
 export interface ChatPageSessionSummary {
   readonly sessionId: string;
+  readonly sessionKind?: string;
   readonly messageCount: number;
 }
 
@@ -106,7 +107,36 @@ export function pickModelSelection(
 export function pickProjectChatSessionId(
   sessions: ReadonlyArray<ChatPageSessionSummary>,
 ): string | null {
-  return sessions.find((session) => session.messageCount > 0)?.sessionId
-    ?? sessions[0]?.sessionId
+  const projectSurfaceSessions = sessions.filter((session) =>
+    !session.sessionKind
+    || session.sessionKind === "chat"
+    || session.sessionKind === "short"
+    || session.sessionKind === "play"
+  );
+  return projectSurfaceSessions.find((session) => session.messageCount > 0)?.sessionId
+    ?? projectSurfaceSessions[0]?.sessionId
     ?? null;
+}
+
+export function shouldShowPlayChoicePanel(input: {
+  readonly playMode?: string | null;
+  readonly choiceSetKey?: string | null;
+  readonly consumedChoiceKey?: string | null;
+  readonly choiceCount: number;
+}): boolean {
+  if (input.playMode !== "guided") return false;
+  if (!input.choiceSetKey) return false;
+  if (input.choiceCount <= 0) return false;
+  return input.choiceSetKey !== input.consumedChoiceKey;
+}
+
+export function isChatScrollNearBottom(input: {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+  readonly thresholdPx?: number;
+}): boolean {
+  const threshold = input.thresholdPx ?? 96;
+  const distanceFromBottom = input.scrollHeight - input.scrollTop - input.clientHeight;
+  return distanceFromBottom <= threshold;
 }

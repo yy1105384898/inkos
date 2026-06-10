@@ -8,12 +8,11 @@ import type {
   ReviseMode,
   LLMClient,
   BookConfig,
-  ToolDefinition,
 } from "../index.js";
-import { chatCompletion, chatWithTools } from "../index.js";
+import { chatCompletion } from "../index.js";
 import { executeEditTransaction } from "./edit-controller.js";
+import { defaultChapterLength } from "../utils/length-metrics.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
-import type { BookCreationDraft } from "./session.js";
 import { writeExportArtifact } from "./export-artifact.js";
 import { safeChildPath } from "../utils/path-safety.js";
 import { deriveBookIdFromTitle } from "../utils/book-id.js";
@@ -75,7 +74,7 @@ type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft"> & {
     },
   ) => Promise<void>;
 };
-type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadBookConfig" | "loadChapterIndex" | "saveChapterIndex" | "listBooks">;
+type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadBookConfig" | "loadChapterIndex" | "saveChapterIndex" | "listBooks" | "acquireBookLock">;
 type InstrumentablePipelineLike = PipelineLike & {
   readonly config?: {
     logger?: Logger;
@@ -100,7 +99,7 @@ function buildBookConfig(input: {
     genre: input.genre ?? "other",
     status: "outlining",
     targetChapters: input.targetChapters ?? 200,
-    chapterWordCount: input.chapterWordCount ?? 3000,
+    chapterWordCount: input.chapterWordCount ?? defaultChapterLength(input.language === "en" ? "en" : "zh"),
     ...(input.language ? { language: input.language } : {}),
     createdAt: now,
     updatedAt: now,
@@ -133,6 +132,19 @@ function buildCreationExternalContext(input: {
   }
 
   return sections.join("\n\n");
+}
+
+async function withBookMutationLock<T>(
+  state: StateLike,
+  bookId: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  const releaseLock = await state.acquireBookLock(bookId);
+  try {
+    return await task();
+  } finally {
+    await releaseLock();
+  }
 }
 
 export function buildChapterFileLookup(files: ReadonlyArray<string>): ReadonlyMap<number, string> {
@@ -328,135 +340,6 @@ async function withPipelineInteractionTelemetry<T extends { chapterNumber?: numb
   }
 }
 
-const CREATE_BOOK_TOOL: ToolDefinition = {
-  name: "create_book",
-  description: "根据用户描述生成建书参数。系统会将参数渲染为可编辑表单，用户确认后建书。",
-  parameters: {
-    type: "object",
-    properties: {
-      title: { type: "string", description: "书名" },
-      genre: { type: "string", description: "题材标识，如 xuanhuan, urban, romance, scifi, mystery" },
-      platform: { type: "string", enum: ["tomato", "qidian", "feilu", "other"], description: "发布平台" },
-      targetChapters: { type: "number", description: "目标章数，默认 200" },
-      chapterWordCount: { type: "number", description: "每章字数，默认 3000" },
-      language: { type: "string", enum: ["zh", "en"], description: "写作语言，默认 zh" },
-      brief: { type: "string", description: "创意简述，会传给 Architect 智能体生成完整的世界观、主角、冲突等 foundation 文件。把用户提到的所有创意要素都写进这里。" },
-    },
-    required: ["title", "genre", "platform", "brief"],
-  },
-};
-
-const BOOK_DRAFT_SYSTEM_PROMPT = [
-  "你是 InkOS 的建书助手。用户会描述想写的书，你需要调用 create_book 工具来生成建书参数。",
-  "",
-  "规则：",
-  "1. 从用户描述中推断所有字段，大胆预填合理默认值。",
-  "2. brief 字段要详细——它会传给 Architect 智能体生成完整的世界观、主角、冲突等 foundation 文件。把用户提到的所有创意要素都写进 brief。",
-  "3. 如果用户后续要求修改某些字段，重新调用 create_book 工具，只更新被提到的字段，其余保持不变。",
-  "4. 不要只回复文字讨论——必须调用 create_book 工具输出结构化参数。",
-].join("\n");
-
-/** Map directive field keys to BookCreationDraft property names. */
-function applyFieldsToDraft(
-  existing: BookCreationDraft | undefined,
-  fields: Readonly<Record<string, string>>,
-  concept: string,
-): BookCreationDraft {
-  const draft: BookCreationDraft = {
-    concept,
-    missingFields: [],
-    readyToCreate: false,
-    ...(existing ?? {}),
-  };
-
-  for (const [key, value] of Object.entries(fields)) {
-    if (!value) continue;
-
-    switch (key) {
-      case "title":
-        draft.title = value;
-        break;
-      case "genre":
-        draft.genre = value;
-        break;
-      case "platform":
-        draft.platform = value;
-        break;
-      case "language":
-        if (value === "zh" || value === "en") draft.language = value;
-        break;
-      case "targetChapters": {
-        const n = parseInt(value, 10);
-        if (!Number.isNaN(n) && n > 0) draft.targetChapters = n;
-        break;
-      }
-      case "chapterWordCount":
-      case "chapterLength": {
-        const n = parseInt(value, 10);
-        if (!Number.isNaN(n) && n > 0) draft.chapterWordCount = n;
-        break;
-      }
-      case "blurb":
-        draft.blurb = value;
-        break;
-      case "worldPremise":
-        draft.worldPremise = value;
-        break;
-      case "settingNotes":
-        draft.settingNotes = value;
-        break;
-      case "protagonist":
-        draft.protagonist = value;
-        break;
-      case "supportingCast":
-        draft.supportingCast = value;
-        break;
-      case "conflictCore":
-        draft.conflictCore = value;
-        break;
-      case "volumeOutline":
-        draft.volumeOutline = value;
-        break;
-      case "constraints":
-        draft.constraints = value;
-        break;
-      case "authorIntent":
-        draft.authorIntent = value;
-        break;
-      case "currentFocus":
-        draft.currentFocus = value;
-        break;
-      // Unknown keys are silently ignored — the LLM may emit
-      // application-level keys we don't map to the draft struct.
-    }
-  }
-
-  return draft;
-}
-
-function formatDraftForUserMessage(
-  existingDraft: BookCreationDraft | undefined,
-  userMessage: string,
-): string {
-  const parts: string[] = [];
-
-  if (existingDraft) {
-    parts.push("## 当前草案状态");
-    const entries = Object.entries(existingDraft).filter(
-      ([, v]) => v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0),
-    );
-    for (const [key, value] of entries) {
-      parts.push(`- **${key}**: ${typeof value === "object" ? JSON.stringify(value) : String(value)}`);
-    }
-    parts.push("");
-  }
-
-  parts.push("## 用户输入");
-  parts.push(userMessage);
-
-  return parts.join("\n");
-}
-
 export function createInteractionToolsFromDeps(
   pipeline: PipelineLike,
   state: StateLike,
@@ -474,76 +357,6 @@ export function createInteractionToolsFromDeps(
 
   return {
     listBooks: () => state.listBooks(),
-    developBookDraft: async (input, existingDraft) => {
-      const concept = existingDraft?.concept ?? input;
-
-      if (!instrumentedPipeline.config?.client || !instrumentedPipeline.config?.model) {
-        // Fallback: no LLM configured
-        return {
-          __interaction: {
-            responseText: "请先配置 LLM 模型，然后再创建书籍。",
-            details: {
-              creationDraft: {
-                concept,
-                missingFields: ["title", "genre", "targetChapters"],
-                readyToCreate: false,
-              },
-            },
-          },
-        };
-      }
-
-      // Build messages - include existing draft context if present
-      const userContent = existingDraft
-        ? `当前草案参数：${JSON.stringify(existingDraft, null, 2)}\n\n用户输入：${input}`
-        : input;
-
-      const result = await chatWithTools(
-        instrumentedPipeline.config.client,
-        instrumentedPipeline.config.model,
-        [
-          { role: "system", content: BOOK_DRAFT_SYSTEM_PROMPT },
-          { role: "user", content: userContent },
-        ],
-        [CREATE_BOOK_TOOL],
-        { temperature: 0.4 },
-      );
-
-      // Extract tool call if present
-      const toolCall = result.toolCalls[0];
-      let parsedArgs: Record<string, unknown> = {};
-      if (toolCall) {
-        try {
-          parsedArgs = JSON.parse(toolCall.arguments);
-        } catch {
-          // If parsing fails, use empty args
-        }
-      }
-
-      // Build a draft from tool call arguments
-      const draft: BookCreationDraft = {
-        concept,
-        title: (parsedArgs.title as string) ?? existingDraft?.title,
-        genre: (parsedArgs.genre as string) ?? existingDraft?.genre,
-        platform: (parsedArgs.platform as string) ?? existingDraft?.platform,
-        language: (parsedArgs.language as "zh" | "en") ?? existingDraft?.language,
-        targetChapters: (parsedArgs.targetChapters as number) ?? existingDraft?.targetChapters,
-        chapterWordCount: (parsedArgs.chapterWordCount as number) ?? existingDraft?.chapterWordCount,
-        blurb: (parsedArgs.brief as string) ?? existingDraft?.blurb,
-        missingFields: [],
-        readyToCreate: Boolean(parsedArgs.title && parsedArgs.genre && parsedArgs.platform),
-      };
-
-      return {
-        __interaction: {
-          responseText: result.content || "已生成建书参数，请确认或修改。",
-          details: {
-            creationDraft: draft,
-            toolCall: toolCall ? { name: toolCall.name, arguments: parsedArgs } : undefined,
-          },
-        },
-      };
-    },
     createBook: async (input) => {
       const book = buildBookConfig(input);
       if (!pipeline.initBook) {
@@ -560,6 +373,7 @@ export function createInteractionToolsFromDeps(
         __interaction: {
           responseText: `Created ${book.title} (${book.id}).`,
           details: {
+            kind: "book_created",
             bookId: book.id,
             title: book.title,
           },
@@ -640,7 +454,7 @@ export function createInteractionToolsFromDeps(
       bookId,
       () => pipeline.reviseDraft(bookId, chapterNumber, mode as ReviseMode),
     ),
-    patchChapterText: async (bookId, chapterNumber, targetText, replacementText) => {
+    patchChapterText: async (bookId, chapterNumber, targetText, replacementText) => withBookMutationLock(state, bookId, async () => {
       const execution = await executeEditTransaction(
         {
           bookDir: (targetBookId) => state.bookDir(targetBookId),
@@ -662,8 +476,29 @@ export function createInteractionToolsFromDeps(
           responseText: execution.summary,
         },
       };
-    },
-    renameEntity: async (bookId, oldValue, newValue) => {
+    }),
+    replaceChapterText: async (bookId, chapterNumber, fullText) => withBookMutationLock(state, bookId, async () => {
+      const execution = await executeEditTransaction(
+        {
+          bookDir: (targetBookId) => state.bookDir(targetBookId),
+          loadChapterIndex: (targetBookId) => state.loadChapterIndex(targetBookId),
+          saveChapterIndex: (targetBookId, index) => state.saveChapterIndex(targetBookId, index),
+        },
+        {
+          kind: "chapter-replace",
+          bookId,
+          chapterNumber,
+          fullText,
+        },
+      );
+      return {
+        __interaction: {
+          activeChapterNumber: chapterNumber,
+          responseText: execution.summary,
+        },
+      };
+    }),
+    renameEntity: async (bookId, oldValue, newValue) => withBookMutationLock(state, bookId, async () => {
       const execution = await executeEditTransaction(
         {
           bookDir: (targetBookId) => state.bookDir(targetBookId),
@@ -683,22 +518,22 @@ export function createInteractionToolsFromDeps(
           responseText: execution.summary,
         },
       };
-    },
-    updateCurrentFocus: async (bookId, content) => {
+    }),
+    updateCurrentFocus: async (bookId, content) => withBookMutationLock(state, bookId, async () => {
       await state.ensureControlDocuments(bookId);
       await writeFile(join(state.bookDir(bookId), "story", "current_focus.md"), content, "utf-8");
-    },
-    updateAuthorIntent: async (bookId, content) => {
+    }),
+    updateAuthorIntent: async (bookId, content) => withBookMutationLock(state, bookId, async () => {
       await state.ensureControlDocuments(bookId);
       await writeFile(join(state.bookDir(bookId), "story", "author_intent.md"), content, "utf-8");
-    },
-    writeTruthFile: async (bookId, fileName, content) => {
+    }),
+    writeTruthFile: async (bookId, fileName, content) => withBookMutationLock(state, bookId, async () => {
       await state.ensureControlDocuments(bookId);
       const storyDir = join(state.bookDir(bookId), "story");
       const safeFileName = assertSafeTruthFileName(fileName);
       const targetPath = safeChildPath(storyDir, safeFileName);
       await mkdir(dirname(targetPath), { recursive: true });
       await writeFile(targetPath, content, "utf-8");
-    },
+    }),
   };
 }

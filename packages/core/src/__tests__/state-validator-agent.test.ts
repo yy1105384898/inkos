@@ -128,6 +128,51 @@ describe("StateValidatorAgent", () => {
     expect(messages[1]?.content).toContain("第1章：发现第五条规则的漏洞");
   });
 
+  it("does not silently truncate chapter or authority context before validation", async () => {
+    const agent = new StateValidatorAgent({
+      client: {
+        provider: "openai",
+        apiFormat: "chat",
+        stream: false,
+        defaults: {
+          temperature: 0.7,
+          maxTokens: 8192,
+          thinkingBudget: 0,
+          extra: {},
+        },
+      },
+      model: "test-model",
+      projectRoot: process.cwd(),
+    });
+
+    const chatSpy = vi.spyOn(
+      agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> },
+      "chat",
+    ).mockResolvedValue({ content: "PASS", usage: ZERO_USAGE });
+
+    await agent.validate(
+      `${"正文".repeat(7000)}\nCHAPTER_TAIL_MARKER`,
+      8,
+      "old state",
+      "new state",
+      "old hooks",
+      "new hooks",
+      "zh",
+      {
+        storyFrame: `${"世界设定".repeat(4000)}\nSTORY_FRAME_TAIL_MARKER`,
+        bookRules: `${"规则".repeat(3000)}\nBOOK_RULES_TAIL_MARKER`,
+        chapterSummaries: `${"摘要".repeat(4000)}\nCHAPTER_SUMMARIES_TAIL_MARKER`,
+      },
+    );
+
+    const messages = chatSpy.mock.calls[0]?.[0] as Array<{ role: string; content: string }>;
+    expect(messages[1]?.content).toContain("CHAPTER_TAIL_MARKER");
+    expect(messages[1]?.content).toContain("STORY_FRAME_TAIL_MARKER");
+    expect(messages[1]?.content).toContain("BOOK_RULES_TAIL_MARKER");
+    expect(messages[1]?.content).toContain("CHAPTER_SUMMARIES_TAIL_MARKER");
+    expect(messages[1]?.content).not.toContain("[...truncated...]");
+  });
+
   it("throws when the validator model returns an empty response", async () => {
     const agent = new StateValidatorAgent({
       client: {

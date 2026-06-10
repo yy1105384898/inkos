@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { TranscriptEventSchema, type TranscriptEvent } from "./session-transcript-schema.js";
-import type { TranscriptRole } from "./session-transcript-schema.js";
+import type { SessionKind, TranscriptRole } from "./session-transcript-schema.js";
 
 const SESSIONS_DIR = ".inkos/sessions";
 const appendQueues = new Map<string, Promise<void>>();
@@ -131,6 +131,13 @@ export async function appendManualSessionMessages(
   sessionId: string,
   messages: ReadonlyArray<AgentMessage>,
   input = "",
+  options: {
+    readonly sessionKind?: SessionKind;
+    readonly legacyDisplay?: {
+      readonly thinking?: string;
+      readonly toolExecutions?: readonly unknown[];
+    };
+  } = {},
 ): Promise<void> {
   const persistedMessages = messages
     .map((message) => ({ message, role: transcriptRoleForMessage(message) }))
@@ -147,6 +154,7 @@ export async function appendManualSessionMessages(
       requestId,
       seq: seq++,
       timestamp: Date.now(),
+      ...(options.sessionKind ? { sessionKind: options.sessionKind } : {}),
       input,
     }];
 
@@ -156,6 +164,14 @@ export async function appendManualSessionMessages(
       const uuid = randomUUID();
       const isToolResult = role === "toolResult";
       const toolCallId = toolCallIdForMessage(message);
+      const legacyDisplay = role === "assistant" && options.legacyDisplay
+        ? {
+            ...(options.legacyDisplay.thinking ? { thinking: options.legacyDisplay.thinking } : {}),
+            ...(options.legacyDisplay.toolExecutions?.length
+              ? { toolExecutions: [...options.legacyDisplay.toolExecutions] }
+              : {}),
+          }
+        : undefined;
       events.push({
         type: "message",
         version: 1,
@@ -169,6 +185,9 @@ export async function appendManualSessionMessages(
         ...(toolCallId ? { toolCallId } : {}),
         ...(isToolResult && lastAssistantUuid
           ? { sourceToolAssistantUuid: lastAssistantUuid }
+          : {}),
+        ...(legacyDisplay && (legacyDisplay.thinking || legacyDisplay.toolExecutions?.length)
+          ? { legacyDisplay }
           : {}),
         message,
       });

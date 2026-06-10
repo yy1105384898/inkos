@@ -291,7 +291,60 @@ export function validatePostWrite(
     }
   }
 
+  // 12. Narrative-person adherence (#290). A first-person book must read as first
+  // person. The clearest deterministic signal of third-person drift is a chapter
+  // that barely uses 我 yet repeatedly narrates the protagonist by name. Thresholds
+  // are conservative so genuine first-person prose (many 我) never trips.
+  const personViolation = detectNarrativePersonDrift(content, bookRules);
+  if (personViolation) violations.push(personViolation);
+
   return violations;
+}
+
+function detectNarrativePersonDrift(
+  content: string,
+  bookRules: BookRules | null,
+): PostWriteViolation | null {
+  if (bookRules?.narrativePerson !== "first") return null;
+  const innerStateSlip = detectFirstPersonInnerStateSlip(content);
+  if (innerStateSlip) {
+    return {
+      rule: "叙事人称",
+      severity: "error",
+      description: `本书设定为第一人称，但出现了第三人称内感叙述："${innerStateSlip}"`,
+      suggestion: "把这类主观感受、意识、脑内活动改回「我」的内心视角；不要切到第三人称或全知视角。",
+    };
+  }
+
+  const name = bookRules.protagonist?.name?.trim();
+  if (!name) return null;
+  const woCount = content.split("我").length - 1;
+  const nameCount = content.split(name).length - 1;
+  // Long chapter, almost no 我, protagonist repeatedly named → third-person prose.
+  if (content.length >= 800 && woCount < 12 && nameCount >= 6 && nameCount > woCount) {
+    return {
+      rule: "叙事人称",
+      severity: "error",
+      description: `本书设定为第一人称，但本章几乎不用「我」（${woCount} 次）却反复以「${name}」第三人称叙述（${nameCount} 次）`,
+      suggestion: "改用第一人称（主角内心视角）重写本章叙事",
+    };
+  }
+  return null;
+}
+
+function detectFirstPersonInnerStateSlip(content: string): string | null {
+  const sentences = content
+    .split(/(?<=[。！？!?])|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  for (const sentence of sentences) {
+    if (!/^[他她]/.test(sentence)) continue;
+    if (/^[他她][^。！？!?]{0,18}(?:觉得|感到|意识到|明白|想起|脑子里|心里|太阳穴)/.test(sentence)) {
+      return sentence.length > 40 ? `${sentence.slice(0, 39)}…` : sentence;
+    }
+  }
+  return null;
 }
 
 /**

@@ -1,16 +1,19 @@
 import type { StateCreator } from "zustand";
 import type {
   AgentResponse,
+  ChatSessionKind,
   ChatStore,
   MessageActions,
+  SendMessageOptions,
   SessionResponse,
   SessionSummary,
 } from "../../types";
-import { buildApiUrl, fetchJson } from "../../../../hooks/use-api";
+import { fetchJson } from "../../../../hooks/use-api";
 import { attachSessionStreamListeners } from "./stream-events";
 import {
   bookKey,
   createSessionRuntime,
+  deriveResolvedProposals,
   deserializeMessages,
   extractErrorMessage,
   mergeSessionIds,
@@ -21,6 +24,19 @@ import {
 export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions> = (set, get) => ({
   activateSession: (sessionId) =>
     set({ activeSessionId: sessionId }),
+
+  setSessionPlayMode: (sessionId, playMode) => {
+    const session = get().sessions[sessionId];
+    set((state) => ({
+      sessions: updateSession(state.sessions, sessionId, () => ({ playMode })),
+    }));
+    if (session?.isDraft) return;
+    void fetchJson(`/sessions/${sessionId}/play-mode`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playMode }),
+    }).catch(() => undefined);
+  },
 
   setInput: (text) => set({ input: text }),
 
@@ -88,21 +104,20 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     })),
 
   loadSessionMessages: (sessionId, msgs) =>
-    set((state) => ({
-      sessions: updateSession(state.sessions, sessionId, (session) => {
-        if (session.messages.length > 0) return {};
-        return { messages: deserializeMessages(msgs) };
-      }),
-    })),
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session || session.messages.length > 0) return {};
+      const messages = deserializeMessages(msgs);
+      return {
+        sessions: updateSession(state.sessions, sessionId, () => ({ messages })),
+        resolvedProposals: {
+          ...state.resolvedProposals,
+          ...deriveResolvedProposals(messages),
+        },
+      };
+    }),
 
-  setSelectedModel: (model, service) => {
-    void fetchJson("/services/config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ service, defaultModel: model }),
-    }).catch(() => {});
-    set({ selectedModel: model, selectedService: service });
-  },
+  setSelectedModel: (model, service) => set({ selectedModel: model, selectedService: service }),
 
   loadSessionList: async (bookId) => {
     const query = bookId === null ? "null" : encodeURIComponent(bookId);
@@ -127,11 +142,11 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     }
   },
 
-  createSession: async (bookId) => {
+  createSession: async (bookId, sessionKind, playMode) => {
     const data = await fetchJson<SessionResponse>("/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bookId }),
+      body: JSON.stringify({ bookId, sessionKind, playMode }),
     });
     const sessionId = data.session?.sessionId;
     if (!sessionId) {
@@ -142,6 +157,8 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       const runtime = createSessionRuntime({
         sessionId,
         bookId: data.session?.bookId ?? bookId ?? null,
+        sessionKind: data.session?.sessionKind ?? sessionKind,
+        playMode: data.session?.playMode,
         title: data.session?.title ?? null,
       });
       return {
@@ -163,7 +180,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     return sessionId;
   },
 
-  createDraftSession: (bookId) => {
+  createDraftSession: (bookId, sessionKind, playMode) => {
     // 前端生成 sessionId（与后端 createBookSession 同格式），暂不持久化到磁盘，
     // 也暂不写入 sessionIdsByBook——侧边栏看不到这条 draft。
     // 发送第一条消息时 sendMessage 会调 POST /sessions { sessionId, bookId } 落盘
@@ -173,6 +190,8 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       const runtime = createSessionRuntime({
         sessionId,
         bookId,
+        sessionKind,
+        playMode,
         title: null,
         isDraft: true,
       });
@@ -254,6 +273,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       if (!detail?.sessionId) return;
       const detailSessionId = detail.sessionId;
       const messages = detail.messages ? deserializeMessages(detail.messages) : [];
+      const restoredResolutions = deriveResolvedProposals(messages);
 
       set((state) => {
         const runtime = state.sessions[detailSessionId];
@@ -267,9 +287,13 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
               ...(runtime ?? createSessionRuntime({
                 sessionId: detailSessionId,
                 bookId: nextBookId,
+                sessionKind: detail.sessionKind,
+                playMode: detail.playMode,
                 title: detail.title ?? null,
               })),
               bookId: nextBookId,
+              sessionKind: detail.sessionKind ?? runtime?.sessionKind,
+              playMode: detail.playMode ?? runtime?.playMode,
               title: detail.title ?? runtime?.title ?? null,
               messages,
             },
@@ -281,6 +305,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
               [detailSessionId],
             ),
           },
+          resolvedProposals: {
+            ...state.resolvedProposals,
+            ...restoredResolutions,
+          },
         };
       });
     } catch {
@@ -288,10 +316,16 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     }
   },
 
-  sendMessage: async (sessionId, text, activeBookId) => {
+  sendMessage: async (sessionId, text, options?: SendMessageOptions) => {
     const trimmed = text.trim();
     const session = get().sessions[sessionId];
     if (!trimmed || !session || session.isStreaming) return;
+    const activeBookId = options?.activeBookId;
+    const sessionKind: ChatSessionKind = options?.sessionKind
+      ?? session.sessionKind
+      ?? (activeBookId ? "book" : "chat");
+    const actionSource = options?.actionSource ?? "free-text";
+    const playMode = options?.playMode ?? session.playMode;
 
     if (!get().selectedModel) {
       get().addUserMessage(sessionId, trimmed);
@@ -307,12 +341,12 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         await fetchJson<SessionResponse>("/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, bookId: session.bookId }),
+          body: JSON.stringify({ sessionId, bookId: session.bookId, sessionKind, playMode }),
         });
         // 落盘成功：把 isDraft 翻成 false，同时把 sessionId 追加进 sessionIdsByBook
         // 让侧边栏现在才看到这条会话。
         set((state) => ({
-          sessions: updateSession(state.sessions, sessionId, () => ({ isDraft: false })),
+          sessions: updateSession(state.sessions, sessionId, () => ({ isDraft: false, sessionKind, playMode })),
           sessionIdsByBook: {
             ...state.sessionIdsByBook,
             [bookKey(session.bookId)]: mergeSessionIds(
@@ -341,38 +375,58 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
     get().addUserMessage(sessionId, trimmed);
     session.stream?.close();
-    const streamUrl = buildApiUrl("/events");
-    if (!streamUrl) return;
-    const streamEs = new EventSource(streamUrl, { withCredentials: true });
+    const streamEs = new EventSource("/api/v1/events");
     set((state) => ({
       sessions: updateSession(state.sessions, sessionId, () => ({ stream: streamEs })),
     }));
     attachSessionStreamListeners({ sessionId, streamTs, streamEs, set, get });
-    let keepStreamOpen = false;
 
     try {
-      const selectedModel = get().selectedModel ?? undefined;
-      const selectedService = get().selectedService ?? undefined;
       const data = await fetchJson<AgentResponse>("/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instruction,
           activeBookId,
+          sessionKind,
+          playMode,
+          actionSource,
+          requestedIntent: options?.requestedIntent,
+          actionPayload: options?.actionPayload,
           sessionId,
-          model: selectedModel,
-          service: selectedService,
+          model: get().selectedModel ?? undefined,
+          service: get().selectedService ?? undefined,
         }),
       });
 
-      if (data.background) {
-        keepStreamOpen = true;
-        return;
-      }
       streamEs.close();
 
       const finalContent = data.details?.draftRaw || data.response || "";
       const toolCall = data.details?.toolCall ?? undefined;
+      const responseBookId = data.session?.activeBookId ?? data.session?.bookId;
+      const responseSessionKind = data.session?.sessionKind;
+      if (responseBookId || responseSessionKind || data.session?.title || data.session?.playMode) {
+        set((state) => {
+          const runtime = state.sessions[sessionId];
+          if (!runtime) return {};
+          const nextBookId = responseBookId ?? runtime.bookId;
+          return {
+            sessions: updateSession(state.sessions, sessionId, () => ({
+              bookId: nextBookId,
+              sessionKind: responseSessionKind ?? runtime.sessionKind,
+              playMode: data.session?.playMode ?? runtime.playMode,
+              title: data.session?.title ?? runtime.title,
+            })),
+            sessionIdsByBook: {
+              ...state.sessionIdsByBook,
+              [bookKey(nextBookId)]: mergeSessionIds(
+                state.sessionIdsByBook[bookKey(nextBookId)],
+                [sessionId],
+              ),
+            },
+          };
+        });
+      }
       const hasStream = Boolean(
         get().sessions[sessionId]?.messages.some((message) => message.timestamp === streamTs),
       );
@@ -403,10 +457,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
           }));
         }
       } else {
-        const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
         if (hasStream) {
-          get().replaceStreamWithError(sessionId, streamTs, emptyMessage);
+          get().finalizeStream(sessionId, streamTs, "", toolCall);
         } else {
+          const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
           get().addErrorMessage(sessionId, emptyMessage);
         }
       }
@@ -422,7 +476,6 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         get().addErrorMessage(sessionId, errorMessage);
       }
     } finally {
-      if (keepStreamOpen) return;
       set((state) => ({
         sessions: updateSession(state.sessions, sessionId, (runtime) => ({
           isStreaming: false,

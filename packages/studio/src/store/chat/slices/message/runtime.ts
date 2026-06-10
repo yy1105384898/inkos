@@ -24,8 +24,14 @@ const TOOL_LABELS: Record<string, string> = {
   edit: "编辑文件",
   grep: "搜索",
   ls: "列目录",
+  context_compression: "整理上下文",
+  propose_action: "确认动作",
   short_fiction_run: "短篇生产",
   generate_cover: "生成封面",
+  play_edit: "编辑互动世界",
+  play_start: "启动互动世界",
+  play_revise: "重做互动回合",
+  play_step: "推进互动世界",
 };
 
 export function bookKey(bookId: string | null | undefined): string {
@@ -145,6 +151,8 @@ export function deriveFlat(
 export function createSessionRuntime(input: {
   sessionId: string;
   bookId: string | null;
+  sessionKind?: SessionRuntime["sessionKind"];
+  playMode?: SessionRuntime["playMode"];
   title: string | null;
   messages?: ReadonlyArray<Message>;
   isDraft?: boolean;
@@ -152,6 +160,8 @@ export function createSessionRuntime(input: {
   return {
     sessionId: input.sessionId,
     bookId: input.bookId,
+    sessionKind: input.sessionKind,
+    playMode: input.playMode,
     title: input.title,
     messages: input.messages ?? [],
     stream: null,
@@ -187,6 +197,53 @@ export function deserializeMessages(
     });
 }
 
+type ProposalResolution = "confirmed" | "rejected";
+
+function proposedActionFrom(exec: ToolExecution): string | null {
+  if (exec.tool !== "propose_action" || exec.status !== "completed") return null;
+  if (!exec.details || typeof exec.details !== "object") return null;
+  const record = exec.details as Record<string, unknown>;
+  if (record.kind !== "proposed_action") return null;
+  return typeof record.action === "string" && record.action.trim() ? record.action : null;
+}
+
+function completesProposedAction(exec: ToolExecution, action: string): boolean {
+  if (exec.status !== "completed") return false;
+  if (action === "create_book") return exec.tool === "sub_agent" && exec.agent === "architect";
+  if (action === "short_run") return exec.tool === "short_fiction_run";
+  if (action === "play_start") return exec.tool === "play_start";
+  if (action === "generate_cover") return exec.tool === "generate_cover";
+  return false;
+}
+
+export function deriveResolvedProposals(
+  messages: ReadonlyArray<Message>,
+): Record<string, ProposalResolution> {
+  const pending = new Map<string, string>();
+  const resolved: Record<string, ProposalResolution> = {};
+
+  for (const message of messages) {
+    for (const exec of message.toolExecutions ?? []) {
+      const proposedAction = proposedActionFrom(exec);
+      if (proposedAction) {
+        pending.set(exec.id, proposedAction);
+        continue;
+      }
+
+      const pendingEntries = Array.from(pending.entries());
+      for (let i = pendingEntries.length - 1; i >= 0; i -= 1) {
+        const [proposalId, action] = pendingEntries[i]!;
+        if (!completesProposedAction(exec, action)) continue;
+        resolved[proposalId] = "confirmed";
+        pending.delete(proposalId);
+        break;
+      }
+    }
+  }
+
+  return resolved;
+}
+
 export function updateSession(
   sessions: Record<string, SessionRuntime>,
   sessionId: string,
@@ -205,13 +262,19 @@ export function updateSession(
 
 export function upsertSessionSummary(
   sessions: Record<string, SessionRuntime>,
-  summary: Pick<SessionSummary, "sessionId" | "bookId" | "title">,
+  summary: Pick<SessionSummary, "sessionId" | "bookId" | "sessionKind" | "playMode" | "title">,
 ): Record<string, SessionRuntime> {
   const existing = sessions[summary.sessionId];
   return {
     ...sessions,
     [summary.sessionId]: existing
-      ? { ...existing, bookId: summary.bookId, title: summary.title }
+      ? {
+          ...existing,
+          bookId: summary.bookId,
+          sessionKind: summary.sessionKind ?? existing.sessionKind,
+          playMode: summary.playMode ?? existing.playMode,
+          title: summary.title,
+        }
       : createSessionRuntime(summary),
   };
 }

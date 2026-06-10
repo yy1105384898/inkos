@@ -46,6 +46,14 @@ export interface DraftSummaryRow {
   readonly value: string;
 }
 
+export interface DraftSummaryStage {
+  readonly key: string;
+  readonly label: string;
+  readonly status: "complete" | "partial" | "missing";
+  readonly rows: ReadonlyArray<DraftSummaryRow>;
+  readonly missing: ReadonlyArray<string>;
+}
+
 interface InteractionSessionResponse {
   readonly session?: {
     readonly activeBookId?: string;
@@ -279,6 +287,111 @@ export function canCreateFromDraft(draft?: BookCreationDraft): boolean {
       && typeof draft.targetChapters === "number"
       && typeof draft.chapterWordCount === "number",
   );
+}
+
+const DRAFT_STAGE_LABELS: Record<"zh" | "en", Record<string, string>> = {
+  zh: {
+    basic: "基础信息",
+    world: "世界观与规则",
+    characters: "主角与角色",
+    conflict: "冲突与回报",
+    structure: "结构与写作约束",
+    title: "书名",
+    genre: "题材",
+    platform: "平台",
+    language: "语言",
+    targetChapters: "目标章数",
+    chapterWordCount: "每章字数",
+    worldPremise: "世界观",
+    settingNotes: "设定备注",
+    protagonist: "主角",
+    supportingCast: "配角",
+    conflictCore: "核心冲突",
+    blurb: "简介",
+    authorIntent: "作者意图",
+    volumeOutline: "卷纲方向",
+    currentFocus: "当前重点",
+    constraints: "写作约束",
+  },
+  en: {
+    basic: "Basic Info",
+    world: "World & Rules",
+    characters: "Protagonist & Cast",
+    conflict: "Conflict & Payoff",
+    structure: "Structure & Constraints",
+    title: "Title",
+    genre: "Genre",
+    platform: "Platform",
+    language: "Language",
+    targetChapters: "Target Chapters",
+    chapterWordCount: "Words per Chapter",
+    worldPremise: "World",
+    settingNotes: "Setting Notes",
+    protagonist: "Protagonist",
+    supportingCast: "Supporting Cast",
+    conflictCore: "Core Conflict",
+    blurb: "Blurb",
+    authorIntent: "Author Intent",
+    volumeOutline: "Volume Direction",
+    currentFocus: "Current Focus",
+    constraints: "Constraints",
+  },
+};
+
+const DRAFT_STAGE_FIELDS: ReadonlyArray<{
+  readonly key: string;
+  readonly fields: ReadonlyArray<keyof BookCreationDraft>;
+}> = [
+  { key: "basic", fields: ["title", "genre", "platform", "targetChapters", "chapterWordCount", "language"] },
+  { key: "world", fields: ["worldPremise", "settingNotes"] },
+  { key: "characters", fields: ["protagonist", "supportingCast"] },
+  { key: "conflict", fields: ["conflictCore", "blurb", "authorIntent"] },
+  { key: "structure", fields: ["volumeOutline", "currentFocus", "constraints"] },
+];
+
+function draftValueAsText(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return null;
+}
+
+export function buildCreationDraftStages(
+  draft: BookCreationDraft,
+  language: "zh" | "en",
+): ReadonlyArray<DraftSummaryStage> {
+  const labels = DRAFT_STAGE_LABELS[language];
+  const missingSet = new Set(draft.missingFields ?? []);
+
+  return DRAFT_STAGE_FIELDS.map((stage) => {
+    const rows: DraftSummaryRow[] = [];
+    for (const field of stage.fields) {
+      const value = draftValueAsText(draft[field]);
+      if (value) {
+        rows.push({ key: String(field), label: labels[field] ?? String(field), value });
+      }
+    }
+    const missing = stage.fields
+      .filter((field) => missingSet.has(field))
+      .map((field) => labels[field] ?? String(field));
+    const status = rows.length === 0
+      ? "missing"
+      : missing.length > 0
+        ? "partial"
+        : "complete";
+
+    return {
+      key: stage.key,
+      label: labels[stage.key] ?? stage.key,
+      status,
+      rows,
+      missing,
+    };
+  });
 }
 
 export function buildCreationDraftSummary(

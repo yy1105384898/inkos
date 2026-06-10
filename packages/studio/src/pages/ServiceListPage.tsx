@@ -5,6 +5,7 @@ import { fetchJson } from "../hooks/use-api";
 import { useServiceStore } from "../store/service";
 import type { EndpointGroup, ServiceInfo } from "../store/service";
 import { ServiceQuickLinks, getServiceQuickLinks } from "../components/ServiceQuickLinks";
+import { ServiceConfigSourceCard } from "../components/ServiceConfigSourceCard";
 
 interface Nav {
   toDashboard: () => void;
@@ -232,6 +233,7 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
   const services = useServiceStore((s) => s.services);
   const loading = useServiceStore((s) => s.servicesLoading);
   const fetchServices = useServiceStore((s) => s.fetchServices);
+  const refreshServices = useServiceStore((s) => s.refreshServices);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
 
@@ -319,6 +321,8 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
       <p className="text-xs text-muted-foreground/70">
         写作模型的 API Key 保存到当前登录用户，手机端和网页端同账号可共用。
       </p>
+
+      <ServiceConfigSourceCard onChange={() => { void refreshServices(); }} />
 
       <CoverConfigCard />
 

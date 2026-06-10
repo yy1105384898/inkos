@@ -1,20 +1,34 @@
 ---
 name: inkos
-description: Autonomous novel writing CLI agent with web workbench (InkOS Studio) - use for creative fiction writing, standalone short-fiction packages, cover generation, novel generation, style imitation, chapter continuation/import, EPUB export, AIGC detection, and fan fiction. Native English support with 10 built-in English genre profiles (LitRPG, Progression Fantasy, Isekai, Cultivation, System Apocalypse, Dungeon Core, Romantasy, Sci-Fi, Tower Climber, Cozy Fantasy). Also supports Chinese web novel genres (xuanhuan, xianxia, urban, horror, other). Multi-agent pipeline, two-phase writer (creative + settlement), stronger long-form chapter craft rules, hook-ledger payoff checks, 33-dimension auditing, token usage analytics, creative brief input, structured logging (JSON Lines), multi-model routing, custom OpenAI-compatible provider support, and InkOS Studio web UI for visual book management, short-fiction runs, cover generation, chapter review, real-time writing progress, market radar, and analytics.
-version: 2.3.4
+description: Local AI fiction creation system with Studio Chat, CLI, and TUI - use for long-form novel writing, standalone short-fiction packages, cover generation, open-world / branching interactive fiction, fan fiction, spinoffs, style imitation, chapter continuation/import, EPUB export, AIGC detection, and project analytics. Native English support with 10 built-in English genre profiles (LitRPG, Progression Fantasy, Isekai, Cultivation, System Apocalypse, Dungeon Core, Romantasy, Sci-Fi, Tower Climber, Cozy Fantasy). Also supports Chinese web novel genres (xuanhuan, xianxia, urban, horror, other). Includes governed context assembly, protected/compressible context budgeting, chapter planning, writing, audit/revision, persistent world/truth state, multi-model routing, cover/image services, custom OpenAI-compatible providers, and InkOS Studio web UI for visual book management, Short runs, Play worlds, cover generation, chapter review, market radar, and analytics.
+version: 2.4.0
 metadata: { "openclaw": { "emoji": "📖", "requires": { "bins": ["inkos", "node"], "env": ["OPENAI_API_KEY"] }, "primaryEnv": "OPENAI_API_KEY", "homepage": "https://github.com/Narcooo/inkos", "install": [{ "id": "npm", "kind": "node", "package": "@actalk/inkos", "label": "Install InkOS (npm)" }] } }
 ---
 
-# InkOS - Autonomous Novel Writing Agent
+# InkOS - Story Creation AI Agent
 
-InkOS is a CLI tool for autonomous fiction writing powered by LLM agents. It orchestrates a multi-agent pipeline (Radar → Planner → Composer → Architect → Writer → Observer → Reflector → Normalizer → Auditor → Reviser) to generate, audit, and revise novel content with zero human intervention per chapter.
+InkOS is a story creation AI agent for long-form novels, short fiction, scripts, fan works, continuations, covers, and open-world / branching interactive play. Prefer the Studio Chat / action-surface workflow for natural-language requests: the model proposes or invokes typed actions, InkOS executes them, and completion is derived from real tool results and files, not from prose claims.
 
-The pipeline operates in three phases:
-- **Phase 1 (Creative Writing, temp 0.7)**: Planner generates chapter intent with hook agenda, Composer selects relevant context, Writer produces prose with length governance, first-screen hooks, semantic density, hook-ledger payoff, and mobile paragraph rhythm guidance.
-- **Phase 2 (State Settlement, temp 0.3)**: Observer over-extracts 9 categories of facts, Reflector outputs a JSON delta (not full markdown), code-layer applies Zod schema validation and immutable state update. Hook operations use upsert/mention/resolve/defer semantics.
-- **Phase 3 (Quality Loop)**: Normalizer adjusts chapter length, Auditor runs 33-dimension check including hook health analysis, Reviser auto-fixes critical issues. Self-correction loop runs until all critical issues clear.
+Long-form writing still uses the chapter pipeline internally:
+- **Input governance**: Architect / Planner / Composer preserve author intent, current focus, outline sections, and relevant truth files instead of injecting everything blindly.
+- **Writing**: Writer produces prose with length governance, craft rules, and context selected for the current task.
+- **Settlement and review**: Observer / Reflector update runtime state; Auditor checks continuity and quality; Reviser handles critical issues. The default write cycle keeps automatic repair conservative and leaves unresolved issues visible for human or agent follow-up.
 
 Truth files are persisted as schema-validated JSON (`story/state/*.json`) with markdown projections for human readability. SQLite temporal memory database (`story/memory.db`) enables relevance-based retrieval on Node 22+.
+
+## v1.5.0 Mental Model
+
+Treat InkOS as a confirmable action system, not a bag of prompt shortcuts.
+
+- Natural-language requests should go through Studio Chat / TUI / `inkos interact` whenever possible.
+- Do not infer success from assistant prose. A book, short, cover, or play step is complete only when the corresponding tool result and files exist.
+- Use `short_fiction_run` only for a standalone short-fiction package.
+- Use `generate_cover` only for cover generation/regeneration.
+- Use `play_start` / `play_step` for Open World or Branching Interactive sessions.
+- Use long-form chapter tools only for existing long-form books.
+- Context is governed: protected facts and current intent should not be silently compressed away; compressible history may be summarized when the context budget is tight.
+
+v1.5 broadly improves instruction following, context management, weak-model formatting resilience, and error separation between InkOS execution, provider calls, and image generation. Still surface unresolved audit issues plainly instead of claiming they were fixed.
 
 ## When to Use InkOS
 
@@ -27,6 +41,7 @@ Truth files are persisted as schema-validated JSON (`story/state/*.json`) with m
 - **Spinoff writing**: Write prequels/sequels/spinoffs while maintaining parent canon
 - **Standalone short fiction**: Generate a complete short-fiction package with outline, draft, review artifacts, synopsis, selling points, and optional cover image
 - **Cover generation**: Generate or regenerate only a cover prompt and cover image from a title, synopsis, or visual direction without rerunning story writing
+- **Interactive worlds**: Start Open World or Branching Interactive sessions with world contracts, character agents, inventory/evidence/relationship state, guided choices, free actions, and optional image generation
 - **Quality auditing**: Detect AI-generated content and perform 33-dimension quality checks
 - **Genre exploration**: Explore trends and create custom genre rules
 - **Analytics**: Track word count, audit pass rate, and issue distribution per book
@@ -118,7 +133,7 @@ inkos status
    ```bash
    inkos write next book-id --count 3 --words 2500 --context "protagonist faces critical choice"
    ```
-   - InkOS maintains 7 truth files (world state, character matrix, emotional arcs, etc.) for consistency
+   - InkOS maintains structured runtime state, readable Markdown projections, control docs, and temporal memory for consistency
    - If only one book exists, omit `book-id` for auto-detection
 
 3. **Review and approve**:
@@ -133,16 +148,14 @@ When InkOS is being driven by OpenClaw or another external agent, prefer the sha
 ```bash
 inkos interact --json --message "continue the current book, but keep the pacing tighter"
 inkos interact --json --message "rewrite chapter 3"
-inkos interact --json --book my-book --message "switch to auto mode"
+inkos interact --json --message "start an open-world detective game about a locked archive room"
 ```
 
-This returns a structured payload containing:
-- the routed request
+The current JSON payload contains:
 - assistant response text
-- updated interaction session
-- execution state
-- pending decision
-- recent interaction events
+- interaction session id / session kind / active book id when bound
+
+Real completion still comes from tool results and files. Do not treat assistant prose alone as proof that a book, chapter, short, cover, or play step was created.
 
 Use this as the primary OpenClaw entry because it shares the same control layer as the project TUI.
 
@@ -207,7 +220,7 @@ Use this when you have an existing novel (or partial novel) and want InkOS to pi
    ```bash
    inkos write next book-id --count 3
    ```
-   - InkOS reverse-engineers all 7 truth files from the imported chapters
+   - InkOS rebuilds structured state, chapter summaries, hooks, character relationships, readable projections, and a style guide from the imported chapters
    - Generates a style guide from the existing text
    - New chapters maintain consistency with imported content
 
@@ -322,32 +335,30 @@ inkos fanfic init --title "What If" --from source.txt --mode au --genre other
 - Fanfic-specific audit dimensions and information boundary controls
 - Ensures new content stays consistent with source canon (or deliberately diverges in au/ooc modes)
 
-### Workflow 12: Rename Characters or Entities Across Entire Book
+### Workflow 12: Edit Persistent Text Through Chat
+
+Use Studio Chat or `inkos interact` for small, explicit edits to generated text artifacts. Treat the chat layer like an external editor: it may edit persisted files, then the writing pipeline can continue from the updated state.
 
 ```bash
-# Via interact
-inkos interact --json --message "把林烬改成张三"
-inkos interact --json --message "rename Lin Jin to Zhang San"
-
-# Via slash command
-inkos interact --json --message "/rename 林烬 => 张三"
+inkos interact --book my-book --json --message "把第 3 章里那句过长的解释删短一点，但不要改剧情事实"
+inkos interact --json --message "把 covers/demo/cover-prompt.md 里的人物拉近一点，标题字更大"
 ```
-- Scans all chapters + all truth files (story_bible, current_state, character_matrix, etc.)
-- Replaces every occurrence in one pass
-- Returns count of files touched
+- Use for clear text edits, cover prompt edits, and control-document edits.
+- Do not infer success from the assistant's prose; check the tool result or changed file.
+- For broad story direction changes, prefer updating `author_intent.md` / `current_focus.md`, then run `plan` / `compose` before writing.
 
-### Workflow 13: Patch Specific Text in a Chapter
+### Workflow 13: Explicit Rename / Replacement Requests
 
-```bash
-inkos interact --json --message "/replace 5 旧文本 => 新文本"
-```
-- Precisely replaces text in chapter 5 only
-- Marks chapter for review after patching
+When the user asks for a rename or targeted replacement, keep the request explicit and scoped. Prefer Studio Chat / `inkos interact` over hidden slash shortcuts; the agent should route the edit through the shared action surface and report which file changed.
+
+Examples:
+- "把当前书里角色 林烬 改成 张三，先说明会影响哪些文件。"
+- "只改第 5 章，把这句旧文本换成新文本，改完标记需要复核。"
 
 ### Workflow 14: Interactive TUI Dashboard
 
 ```bash
-inkos
+inkos tui
 ```
 - Launches a full-screen Ink + React dashboard with conversational creation
 - Slash command autocomplete (Tab), input history (arrow keys)
@@ -396,12 +407,30 @@ The standalone cover tool writes:
 
 If cover image generation fails, report the provider/configuration error plainly. Do not rewrite the story, do not rerun `short_fiction_run`, and do not suggest unrelated external tools unless the user asks.
 
+### Workflow 17: Open World / Branching Interactive Play
+
+Use this when the user wants to play inside an interactive world instead of generating a finished manuscript.
+
+In Studio or agent mode, ask naturally:
+
+```text
+Create a Warcraft-like border watchtower open world. Time can advance differently by action: patrols take an hour, training can take days. Equipment should show rarity through material and atmosphere, not stat blocks.
+```
+
+For tool-using agents:
+- Call `play_start` when there is no active world/run yet, or when the user explicitly asks to start a new world.
+- Call `play_step` when the user performs an action inside an existing world.
+- Keep Open World free-form: do not force clickable choices unless the current session is Branching Interactive.
+- If the user changes world rules, persona, visual contract, or character behavior, treat it as a world-state edit or a new instruction for the next step, not as long-form chapter writing.
+- If image generation is configured, let Play generate scene / character / item / evidence images through the Play image path. Do not call the short-fiction cover tool for Play scene images.
+
 ## InkOS Studio (Web Workbench)
 
 `inkos studio` launches a local web UI (default port 4567) that provides a visual interface for all InkOS operations:
 
 - **Book management** — create, delete, export (TXT/MD/EPUB), configure per-book settings
 - **Short fiction & cover tools** — generate independent short-fiction packages, synopsis/selling points, cover prompts, and standalone covers
+- **Open World / Branching Interactive** — start and continue interactive worlds with world contracts, free actions, clickable choices, HUD state, and image generation
 - **Chapter review & editing** — approve/reject drafts, edit content inline, multi-mode revision (polish/spot-fix/rewrite/anti-detect)
 - **Real-time writing progress** — SSE-based live updates during chapter generation
 - **Market radar** — AI-powered trend analysis with platform/genre recommendations
@@ -411,14 +440,14 @@ If cover image generation fails, report the provider/configuration error plainly
 - **Genre management** — create/customize genre profiles with fatigue words, pacing rules, audit dimensions
 - **Daemon control** — start/stop background writing with event log
 - **Truth file editor** — view and edit canonical knowledge base per book
-- **Config editor** — LLM provider, model routing, notifications
+- **Config editor** — LLM provider, model routing, cover/image services, notifications
 
 ```bash
 inkos studio              # Start on default port 4567
 inkos studio -p 8080      # Start on custom port
 ```
 
-The right-side **AI Assistant panel** in Studio shares the same interaction kernel as TUI and `inkos interact`. You can type natural language commands (rename entities, write chapters, audit, export) directly in the assistant panel.
+The **Studio Chat** surface shares the same action kernel as TUI and CLI. It can answer questions, propose/confirm creation actions, run Short, generate covers, start Play, edit persistent text artifacts, and invoke long-form writing operations.
 
 ## Advanced: Natural Language Agent Mode
 
@@ -450,7 +479,7 @@ These tools are the preferred control surface for chapter steering:
   - Rewrites `story/current_focus.md`
   - Use for local steering over the next 1-3 chapters
 
-## Short Fiction and Cover Agent Tools
+## Short Fiction, Cover, and Play Agent Tools
 
 These are the preferred tools when InkOS is driven by OpenClaw, Studio chat, or `inkos agent`:
 
@@ -466,6 +495,16 @@ These are the preferred tools when InkOS is driven by OpenClaw, Studio chat, or 
   - Use when the user asks to create or regenerate a cover for an existing title, synopsis, or completed short
   - Also use when the user changes the cover prompt through chat; pass the revised visual direction as `coverPrompt` and reuse the existing `outputDir` when available
   - Do not rerun story generation unless the user explicitly asks for a new story
+
+- `play_start`
+  - Starts a new Open World or Branching Interactive run
+  - Use when the user asks to play in a world, simulate an interactive story, create a game-like scene, or start a free-action/choice-based session
+  - The user's world contract should carry time rules, character agency, item/evidence rules, tone, genre, and visual style when provided
+
+- `play_step`
+  - Advances an existing Play run by one user action
+  - Use for free-form actions such as "inspect the letter", "talk to the guard", "train for three days", or "choose option 2"
+  - Do not use it to write the next chapter of a long-form book
 
 `write_truth_file` remains available for broad file edits, but prefer the dedicated control tools above for input-governance changes.
 
@@ -487,28 +526,24 @@ All content-generating commands support `--json` for structured output. Essentia
 inkos draft book-id --words 3000 --context "guidance" --json
 ```
 
-### Truth Files (Long-Term Memory)
-InkOS maintains 7 files per book for coherence:
-- **World State**: Maps, locations, technology levels, magic systems
-- **Character Matrix**: Names, relationships, arcs, motivations
-- **Resource Ledger**: In-world items, money, power levels
-- **Chapter Summaries**: Events, progression, foreshadowing
-- **Subplot Board**: Active and dormant subplots, hooks
-- **Emotional Arcs**: Character emotional progression
-- **Pending Hooks**: Unresolved cliffhangers and promises to reader
+### Long-Term Memory
+InkOS maintains each book's memory in three layers:
+- **Structured state**: `story/state/*.json` is the authoritative runtime state, validated by Zod schemas.
+- **Readable projections**: `current_state.md`, `pending_hooks.md`, `chapter_summaries.md`, `character_matrix.md`, and related Markdown files are for humans and debugging.
+- **Temporal memory**: `story/memory.db` on Node 22+ supports relevance-based retrieval of facts, hooks, and chapter summaries.
 
-All agents reference these to maintain long-term consistency. Since 0.6.0, truth files are backed by schema-validated JSON in `story/state/` with automatic bootstrap from markdown for legacy books. During `import chapters`, these files are reverse-engineered from existing content via the ChapterAnalyzerAgent.
+Agents use the governed composer to select the relevant parts for the current task instead of blindly injecting every file. During `import chapters`, InkOS rebuilds structured state and projections from existing content via the ChapterAnalyzerAgent.
 
 ### Multi-Phase Writer Architecture
 The Writer operates across multiple phases with specialized agents:
 - **Planner**: Generates chapter intent with structured hook agenda (mustAdvance, eligibleResolve, staleDebt) based on memory retrieval.
-- **Composer**: Selects relevant context from truth files by relevance scoring, compiles rule stack and runtime artifacts.
+- **Composer**: Selects relevant context from structured state, control docs, readable projections, and retrieval results, then compiles rule stack and runtime artifacts.
 - **Phase 1 (Creative, temp 0.7)**: Generates prose with length governance, English variance brief (anti-repetition), and dialogue-driven guidance.
 - **Phase 2a (Observer, temp 0.5)**: Over-extracts 9 categories of facts from the chapter text.
 - **Phase 2b (Reflector, temp 0.3)**: Outputs a JSON delta with hookOps (upsert/mention/resolve/defer), currentStatePatch, and chapterSummary. Code-layer validates via Zod schema and applies immutably.
 - **Normalizer**: Single-pass compress/expand to bring chapter length into the target band. Safety net rejects destructive normalization (>75% content loss).
 - **Auditor**: 33-dimension check including hook health analysis (stale debt, burst detection, no-advance warnings).
-- **Reviser**: Auto-fixes critical issues, self-correction loop until clean.
+- **Reviser**: Attempts one configured repair pass for critical issues, then keeps unresolved findings visible for human or agent follow-up.
 
 Truth files use structured JSON (`story/state/*.json`) as the authoritative source, with markdown projections for human readability. Hook admission control prevents duplicate/family hooks from inflating the hook table.
 
@@ -580,11 +615,11 @@ inkos genre copy xuanhuan
 | `inkos compose chapter [book-id]` | Generate runtime artifacts | Context, rule-stack, trace for next chapter |
 | `inkos consolidate [book-id]` | Consolidate chapter summaries | Reduces context for long books (volume-level summaries) |
 | `inkos eval [book-id]` | Quality evaluation report | `--json`, `--chapters <range>`. Composite quality score |
-| `inkos studio` | Start web workbench | `-p` for port. Local web UI for book management |
+| `inkos` / `inkos studio` | Start web workbench | `-p` for port. Local web UI for book management |
 | `inkos fanfic show [book-id]` | Display parsed fanfic canon | Shows imported source material analysis |
 | `inkos fanfic refresh [book-id]` | Re-import and regenerate fanfic canon | `--from <file>` for updated source material |
 | `inkos interact` | Shared interaction endpoint | `--json`, `--message`, `--book`. Primary entry for OpenClaw |
-| `inkos` (no args) | Launch TUI dashboard | Full-screen Ink + React interactive dashboard |
+| `inkos tui` | Launch TUI dashboard | Full-screen Ink + React interactive dashboard |
 
 ## Error Handling
 
@@ -642,7 +677,7 @@ inkos down
 - **No install hooks**: npm package has no `preinstall`/`postinstall`/`install` scripts. Install is inert.
 - **Local-only file I/O**: all read/write stays inside the project directory (`books/*`, `inkos.json`, `inkos.log`). No writes outside the working directory.
 - **No telemetry**: InkOS does not phone home, collect usage stats, or ship any data to InkOS-controlled servers. The only outbound traffic is to the LLM provider endpoint you explicitly configure.
-- **Credential handling**: always prefer `--api-key-env <VAR_NAME>` over `--api-key <literal>` so keys never hit shell history. Keys are stored in `inkos.json` under your project directory — treat it like a secret and add it to `.gitignore` if you commit the project.
+- **Credential handling**: prefer Studio service settings or `--api-key-env <VAR_NAME>` over literal keys. Studio stores service secrets in project-local `.inkos/secrets.json`; CLI env settings live in `~/.inkos/.env` or project `.env`. Treat all of these as secrets and keep them out of commits.
 - **Custom provider base-URL**: `--provider custom` forwards your API key to whatever URL you specify. Only point it at endpoints you trust (your own proxy or an audited reverse-proxy). Never paste an untrusted `--base-url`.
 - **No elevated privileges**: InkOS requires no sudo, no global state mutation, no network listening port (Studio binds `localhost:4567` only).
 

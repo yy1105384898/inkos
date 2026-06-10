@@ -8,7 +8,7 @@ import type { GenreProfile } from "../models/genre-profile.js";
 import { ArchitectAgent, type ArchitectOutput } from "../agents/architect.js";
 import { FoundationReviewerAgent } from "../agents/foundation-reviewer.js";
 import { PlannerAgent, type PlanChapterOutput } from "../agents/planner.js";
-import { composeGovernedChapter, type ComposeChapterOutput } from "../agents/composer.js";
+import { ComposerAgent, composeGovernedChapter, contextBudgetFromClient, type ComposeChapterOutput } from "../agents/composer.js";
 import { WriterAgent, type WriteChapterInput, type WriteChapterOutput } from "../agents/writer.js";
 import { LengthNormalizerAgent } from "../agents/length-normalizer.js";
 import { ChapterAnalyzerAgent } from "../agents/chapter-analyzer.js";
@@ -29,6 +29,7 @@ import type { AuditResult, AuditIssue } from "../agents/continuity.js";
 import type { RadarResult } from "../agents/radar.js";
 import type { LengthSpec, LengthTelemetry } from "../models/length-governance.js";
 import type { ChapterMemo, ContextPackage, RuleStack } from "../models/input-governance.js";
+import type { ContextCompressionCallback } from "../models/context-compression.js";
 import { buildLengthSpec, countChapterLength, formatLengthCount, isOutsideHardRange, resolveLengthCountingMode, type LengthLanguage } from "../utils/length-metrics.js";
 import { analyzeLongSpanFatigue } from "../utils/long-span-fatigue.js";
 import { buildWritingMethodologySection } from "../utils/writing-methodology.js";
@@ -166,6 +167,33 @@ function buildTitleCatalog(
   return [...head, marker, ...tail].join("\n");
 }
 
+/**
+ * Build the architect external-context for a side-story (番外) foundation: frame
+ * it as a companion work that reuses the parent canon's cast/world but tells an
+ * independent side plot, and attach the parent canon as reference material.
+ */
+export function buildSpinoffFoundationContext(
+  parentCanon: string,
+  direction: string | undefined,
+  language: "zh" | "en",
+): string {
+  const dir = direction?.trim();
+  if (language === "en") {
+    return [
+      "## This is a SIDE-STORY (番外)",
+      "Reuse the established characters, world, and rules from the parent canon below. Tell an INDEPENDENT side plot — a bonus arc, a character backstory, or a what-if — that does NOT advance or contradict the parent work's main storyline.",
+      dir ? `\n## Side-story direction\n${dir}` : "",
+      `\n## Parent canon (reuse these characters and settings)\n${parentCanon}`,
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    "## 这是一部番外",
+    "复用下方正传正典里已确立的角色、世界观与规则。讲一个独立的侧篇故事——支线、角色前传或 what-if——不要推进或违背正传的主线剧情。",
+    dir ? `\n## 番外方向\n${dir}` : "",
+    `\n## 正传正典（复用以下角色与设定）\n${parentCanon}`,
+  ].filter(Boolean).join("\n");
+}
+
 export function buildImportFoundationSource(
   chapters: ReadonlyArray<{ readonly title: string; readonly content: string }>,
   language: LengthLanguage,
@@ -225,6 +253,12 @@ export interface PipelineConfig {
   readonly defaultLLMConfig?: LLMConfig;
   readonly foundationReviewRetries?: number;
   readonly writingReviewRetries?: number;
+  /**
+   * "auto" (default): writeNextChapter runs the audit→revise loop inline.
+   * "manual": stop right after the draft (no auto audit/revise) so review/revise
+   * become explicit, user-driven checkpoint actions — chapter write stays fast.
+   */
+  readonly chapterReviewMode?: "auto" | "manual";
   readonly notifyChannels?: ReadonlyArray<NotifyChannel>;
   readonly radarSources?: ReadonlyArray<RadarSource>;
   readonly externalContext?: string;
@@ -232,6 +266,7 @@ export interface PipelineConfig {
   readonly inputGovernanceMode?: InputGovernanceMode;
   readonly logger?: Logger;
   readonly onStreamProgress?: OnStreamProgress;
+  readonly onContextCompression?: ContextCompressionCallback;
 }
 
 export interface TokenUsageSummary {
@@ -422,6 +457,7 @@ export class PipelineRunner {
     readonly styleGuide?: string;
     readonly language: "zh" | "en";
     readonly stageLanguage: LengthLanguage;
+    readonly targetChapters?: number;
     readonly maxRetries?: number;
   }): Promise<ArchitectOutput> {
     const maxRetries = params.maxRetries ?? this.config.foundationReviewRetries ?? 2;
@@ -439,6 +475,7 @@ export class PipelineRunner {
         sourceCanon: params.sourceCanon,
         styleGuide: params.styleGuide,
         language: params.language,
+        targetChapters: params.targetChapters,
       });
 
       this.config.logger?.info(
@@ -467,6 +504,7 @@ export class PipelineRunner {
       sourceCanon: params.sourceCanon,
       styleGuide: params.styleGuide,
       language: params.language,
+      targetChapters: params.targetChapters,
     });
     this.config.logger?.info(
       `Foundation final review: ${finalReview.totalScore}/100 ${finalReview.passed ? "PASSED" : "ACCEPTED (max retries)"}`,
@@ -633,6 +671,7 @@ export class PipelineRunner {
       mode: "original",
       language: resolvedLanguage,
       stageLanguage,
+      targetChapters: book.targetChapters,
     });
     try {
       this.logStage(stageLanguage, { zh: "保存书籍配置", en: "saving book config" });
@@ -757,6 +796,7 @@ export class PipelineRunner {
         foundation,
         mode: "original",
         language: resolvedLanguage,
+        targetChapters: book.targetChapters,
       } as Parameters<FoundationReviewerAgent["review"]>[0]);
       if (!review.passed) {
         this.config.logger?.warn?.(
@@ -878,6 +918,7 @@ export class PipelineRunner {
       sourceCanon: fanficCanon,
       language: resolvedLanguage,
       stageLanguage,
+      targetChapters: book.targetChapters,
     });
     this.logStage(stageLanguage, { zh: "写入基础设定文件", en: "writing foundation files" });
     await architect.writeFoundationFiles(
@@ -900,6 +941,71 @@ export class PipelineRunner {
     await mkdir(join(bookDir, "chapters"), { recursive: true });
     await this.state.saveChapterIndex(book.id, []);
     await this.state.snapshotState(book.id, 0);
+  }
+
+  /**
+   * Create a side-story (番外) book: a standalone companion that inherits a
+   * parent book's world/characters via parent_canon.md, but tells an INDEPENDENT
+   * side plot that does not advance or contradict the parent's main-line state.
+   * Reuses importCanon (which already builds the parent-canon reference for
+   * side-story writing) + the standard original-foundation architect path.
+   */
+  async initSpinoffBook(book: BookConfig, parentBookId: string, direction?: string): Promise<void> {
+    const bookDir = this.state.bookDir(book.id);
+    const stageLanguage = await this.resolveBookLanguage(book);
+
+    this.logStage(stageLanguage, { zh: "保存书籍配置", en: "saving book config" });
+    await this.state.saveBookConfig(book.id, book);
+
+    this.logStage(stageLanguage, { zh: "导入正传正典参照", en: "importing parent canon" });
+    const parentCanon = await this.importCanon(book.id, parentBookId);
+
+    const architect = new ArchitectAgent(this.agentCtxFor("architect", book.id));
+    const reviewer = new FoundationReviewerAgent(this.agentCtxFor("foundation-reviewer", book.id));
+    const { profile: gp } = await this.loadGenreProfile(book.genre);
+    const resolvedLanguage = (book.language ?? gp.language) === "en" ? "en" as const : "zh" as const;
+    const spinoffContext = buildSpinoffFoundationContext(parentCanon, direction, resolvedLanguage);
+
+    this.logStage(stageLanguage, { zh: "生成番外基础设定", en: "generating side-story foundation" });
+    const foundation = await this.generateAndReviewFoundation({
+      generate: (reviewFeedback) => architect.generateFoundation(book, spinoffContext, reviewFeedback),
+      reviewer,
+      mode: "original",
+      language: resolvedLanguage,
+      stageLanguage,
+      targetChapters: book.targetChapters,
+    });
+
+    this.logStage(stageLanguage, { zh: "写入基础设定文件", en: "writing foundation files" });
+    await architect.writeFoundationFiles(bookDir, foundation, gp.numericalSystem, book.language ?? gp.language);
+
+    this.logStage(stageLanguage, { zh: "初始化控制文档", en: "initializing control documents" });
+    await this.state.ensureControlDocuments(book.id, direction?.trim() || this.config.externalContext);
+
+    this.logStage(stageLanguage, { zh: "创建初始快照", en: "creating initial snapshot" });
+    await mkdir(join(bookDir, "chapters"), { recursive: true });
+    await this.state.saveChapterIndex(book.id, []);
+    await this.state.snapshotState(book.id, 0);
+  }
+
+  /**
+   * Create an imitation (仿写) book: an ORIGINAL story whose prose imitates the
+   * voice of a reference work. The architect builds an original foundation from
+   * the user's story idea; the reference text becomes the book's style_guide.md
+   * so the writer mimics its style. The style guide is mandatory here (imitation
+   * is the whole point), so a failure to generate it surfaces rather than being
+   * silently skipped.
+   */
+  async initImitationBook(
+    book: BookConfig,
+    referenceText: string,
+    storyIdea: string,
+    sourceName?: string,
+  ): Promise<void> {
+    await this.initBook(book, { externalContext: storyIdea });
+    const stageLanguage = await this.resolveBookLanguage(book);
+    this.logStage(stageLanguage, { zh: "提取参考作品风格指纹", en: "extracting reference style fingerprint" });
+    await this.generateStyleGuide(book.id, referenceText, sourceName?.trim() || "reference");
   }
 
   /** Write a single draft chapter. Saves chapter file + truth files + index + snapshot. */
@@ -1558,58 +1664,88 @@ export class PipelineRunner {
 
     // Token usage accumulator
     let totalUsage: TokenUsageSummary = output.tokenUsage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-    const auditor = new ContinuityAuditor(this.agentCtxFor("auditor", bookId));
-    const reviewResult = await runChapterReviewCycle({
-      book: { genre: book.genre },
-      bookDir,
-      chapterNumber,
-      initialOutput: output,
-      reducedControlInput,
-      lengthSpec,
-      initialUsage: totalUsage,
-      createReviser: () => new ReviserAgent(this.agentCtxFor("reviser", bookId)),
-      auditor,
-      normalizeDraftLengthIfNeeded: (chapterContent) => this.normalizeDraftLengthIfNeeded({
-        bookId,
+    let finalContent: string;
+    let finalWordCount: number;
+    let revised: boolean;
+    let auditResult: AuditResult;
+    let postReviseCount: number;
+    let normalizeApplied: boolean;
+    let preAuditNormalizedWordCount: number | undefined;
+
+    if ((this.config.chapterReviewMode ?? "auto") === "manual") {
+      // C4a: write-only checkpoint. Stop right after the draft — skip the
+      // automatic audit→revise loop (which silently doubled chapter time when it
+      // fired). The user drives review / revise / accept afterwards.
+      this.logStage(stageLanguage, { zh: "写完即停（手动审查模式）", en: "draft written — stopping for manual review" });
+      finalContent = normalizePostWriteSurface(output.content, pipelineLang);
+      this.assertChapterContentNotEmpty(finalContent, chapterNumber, "manual write");
+      finalWordCount = countChapterLength(finalContent, lengthSpec.countingMode);
+      revised = false;
+      postReviseCount = 0;
+      normalizeApplied = finalContent !== output.content;
+      preAuditNormalizedWordCount = writerCount;
+      auditResult = {
+        passed: false,
+        issues: [],
+        summary: pipelineLang === "en"
+          ? "Not reviewed yet (manual mode: stopped after writing — run review when ready)."
+          : "尚未审查（手动模式：写完即停，需要时点“审查”）。",
+      };
+    } else {
+      const auditor = new ContinuityAuditor(this.agentCtxFor("auditor", bookId));
+      const reviewResult = await runChapterReviewCycle({
+        book: { genre: book.genre },
+        bookDir,
         chapterNumber,
-        chapterContent,
+        initialOutput: output,
+        reducedControlInput,
         lengthSpec,
-        chapterIntent: writeInput.chapterIntent,
-      }),
-      normalizePostWriteSurface: (chapterContent) =>
-        normalizePostWriteSurface(chapterContent, pipelineLang),
-      assertChapterContentNotEmpty: (content, stage) =>
-        this.assertChapterContentNotEmpty(content, chapterNumber, stage),
-      addUsage: PipelineRunner.addUsage,
-      analyzeAITells: (content) => analyzeAITells(content, pipelineLang),
-      analyzeSensitiveWords: (content) => analyzeSensitiveWords(content, undefined, pipelineLang),
-      runPostWriteChecks: (content) => {
-        const baseIssues = postWriteValidate(content, gp, parsedBookRules, pipelineLang)
-          .filter((v) => v.severity === "error")
-          .map((v) => ({
-            severity: "critical" as const,
-            category: v.rule,
-            description: v.description,
-            suggestion: v.suggestion,
-          }));
-        // Phase 9-3: verify the draft acts on every hook the memo committed to.
-        const memoBody = writeInput.chapterMemo?.body ?? "";
-        const ledgerIssues = memoBody
-          ? validateHookLedger(memoBody, content)
-          : [];
-        return [...baseIssues, ...ledgerIssues];
-      },
-      maxReviewIterations: this.config.writingReviewRetries,
-      logWarn: (message) => this.logWarn(pipelineLang, message),
-      logStage: (message) => this.logStage(stageLanguage, message),
-    });
-    totalUsage = reviewResult.totalUsage;
-    let finalContent = reviewResult.finalContent;
-    let finalWordCount = reviewResult.finalWordCount;
-    let revised = reviewResult.revised;
-    let auditResult = reviewResult.auditResult;
-    const postReviseCount = reviewResult.postReviseCount;
-    const normalizeApplied = reviewResult.normalizeApplied;
+        initialUsage: totalUsage,
+        createReviser: () => new ReviserAgent(this.agentCtxFor("reviser", bookId)),
+        auditor,
+        normalizeDraftLengthIfNeeded: (chapterContent) => this.normalizeDraftLengthIfNeeded({
+          bookId,
+          chapterNumber,
+          chapterContent,
+          lengthSpec,
+          chapterIntent: writeInput.chapterIntent,
+        }),
+        normalizePostWriteSurface: (chapterContent) =>
+          normalizePostWriteSurface(chapterContent, pipelineLang),
+        assertChapterContentNotEmpty: (content, stage) =>
+          this.assertChapterContentNotEmpty(content, chapterNumber, stage),
+        addUsage: PipelineRunner.addUsage,
+        analyzeAITells: (content) => analyzeAITells(content, pipelineLang),
+        analyzeSensitiveWords: (content) => analyzeSensitiveWords(content, undefined, pipelineLang),
+        runPostWriteChecks: (content) => {
+          const baseIssues = postWriteValidate(content, gp, parsedBookRules, pipelineLang)
+            .filter((v) => v.severity === "error")
+            .map((v) => ({
+              severity: "critical" as const,
+              category: v.rule,
+              description: v.description,
+              suggestion: v.suggestion,
+            }));
+          // Phase 9-3: verify the draft acts on every hook the memo committed to.
+          const memoBody = writeInput.chapterMemo?.body ?? "";
+          const ledgerIssues = memoBody
+            ? validateHookLedger(memoBody, content)
+            : [];
+          return [...baseIssues, ...ledgerIssues];
+        },
+        maxReviewIterations: this.config.writingReviewRetries,
+        logWarn: (message) => this.logWarn(pipelineLang, message),
+        logStage: (message) => this.logStage(stageLanguage, message),
+      });
+      totalUsage = reviewResult.totalUsage;
+      finalContent = reviewResult.finalContent;
+      finalWordCount = reviewResult.finalWordCount;
+      revised = reviewResult.revised;
+      auditResult = reviewResult.auditResult;
+      postReviseCount = reviewResult.postReviseCount;
+      normalizeApplied = reviewResult.normalizeApplied;
+      preAuditNormalizedWordCount = reviewResult.preAuditNormalizedWordCount;
+    }
 
     // 3b. Lightweight per-chapter promotion pass — check if any hooks should
     // be promoted based on advanced_count derived from chapter_summaries.
@@ -1711,7 +1847,7 @@ export class PipelineRunner {
     const lengthTelemetry = this.buildLengthTelemetry({
       lengthSpec,
       writerCount,
-      postWriterNormalizeCount: reviewResult.preAuditNormalizedWordCount,
+      postWriterNormalizeCount: preAuditNormalizedWordCount,
       postReviseCount,
       finalCount: finalWordCount,
       normalizeApplied,
@@ -2160,13 +2296,13 @@ export class PipelineRunner {
     const storyDir = join(bookDir, "story");
     await mkdir(storyDir, { recursive: true });
 
-    // Statistical fingerprint
-    const profile = analyzeStyle(sample, sourceName);
-    await writeFile(join(storyDir, "style_profile.json"), JSON.stringify(profile, null, 2), "utf-8");
-
     const book = await this.state.loadBookConfig(bookId);
     const { profile: gp } = await this.loadGenreProfile(book.genre);
     const lang = (book.language ?? gp.language) === "en" ? "en" as const : "zh" as const;
+
+    // Statistical fingerprint (language-aware: words for en, characters for zh)
+    const profile = analyzeStyle(sample, sourceName, lang);
+    await writeFile(join(storyDir, "style_profile.json"), JSON.stringify(profile, null, 2), "utf-8");
 
     let qualitativeGuide: string;
     if (sample.length < 500) {
@@ -2178,11 +2314,37 @@ export class PipelineRunner {
       });
     } else {
       try {
-        // LLM qualitative extraction
-        const response = await chatCompletion(this.config.client, this.config.model, [
-          {
-            role: "system",
-            content: `你是一位文学风格分析专家。分析参考文本的写作风格，提取可供模仿的定性特征。
+        // LLM qualitative extraction (language-aware prompt)
+        const styleSystemPrompt = lang === "en"
+          ? `You are a literary style analyst. Analyze the writing style of the reference text and extract qualitative, imitable features.
+
+Output format (Markdown):
+## Narrative Voice & Tone
+(detached / fervent / ironic / warm / ..., with 1-2 quoted lines from the text)
+
+## Dialogue Style
+(shared traits in how characters speak: sentence length, verbal tics, dialect markers, dialogue rhythm)
+
+## Scene Description
+(sensory preferences, choice of imagery, description density, how setting ties to emotion)
+
+## Transitions & Connective Technique
+(how scenes switch, how time jumps are handled, paragraph-to-paragraph transitions)
+
+## Pacing
+(distribution of long vs short sentences, paragraph-length preference, how climaxes and lulls alternate)
+
+## Diction
+(signature high-frequency word choices, figurative/rhetorical tendencies, degree of colloquialism)
+
+## Emotional Expression
+(direct lyricism vs externalized action, frequency and style of interior monologue)
+
+## Distinctive Habits
+(any personal writing habits worth imitating)
+
+Base the analysis on the text's actual features, not generalities. Support each section with 1-2 quoted lines from the original.`
+          : `你是一位文学风格分析专家。分析参考文本的写作风格，提取可供模仿的定性特征。
 
 输出格式（Markdown）：
 ## 叙事声音与语气
@@ -2209,12 +2371,13 @@ export class PipelineRunner {
 ## 独特习惯
 （任何值得模仿的个人写作习惯）
 
-分析必须基于原文实际特征，不要泛泛而谈。每个部分用1-2个原文例句佐证。`,
-          },
-          {
-            role: "user",
-            content: `分析以下参考文本的写作风格：\n\n${sample.slice(0, 20000)}`,
-          },
+分析必须基于原文实际特征，不要泛泛而谈。每个部分用1-2个原文例句佐证。`;
+        const styleUserPrompt = lang === "en"
+          ? `Analyze the writing style of the following reference text:\n\n${sample}`
+          : `分析以下参考文本的写作风格：\n\n${sample}`;
+        const response = await chatCompletion(this.config.client, this.config.model, [
+          { role: "system", content: styleSystemPrompt },
+          { role: "user", content: styleUserPrompt },
         ], { temperature: 0.3 });
         qualitativeGuide = response.content.trim()
           ? response.content
@@ -2504,6 +2667,7 @@ ${matrix}`,
               mode: "series",
               language: resolvedLanguage === "en" ? "en" : "zh",
               stageLanguage: resolvedLanguage,
+              targetChapters: book.targetChapters,
             })
           : await architect.generateFoundationFromImport(book, foundationSource);
         await architect.writeFoundationFiles(
@@ -2564,12 +2728,17 @@ ${matrix}`,
           ruleStack: governedInput.ruleStack,
         });
 
-        // Save chapter file + core truth files (state, ledger, hooks)
-        await writer.saveChapter(bookDir, {
+        const chapterWordCount = countChapterLength(ch.content, countingMode);
+        const persistedOutput: WriteChapterOutput = {
           ...output,
+          content: ch.content,
+          wordCount: chapterWordCount,
           postWriteErrors: [],
           postWriteWarnings: [],
-        }, gp.numericalSystem, resolvedLanguage);
+        };
+
+        // Save chapter file + core truth files (state, ledger, hooks)
+        await writer.saveChapter(bookDir, persistedOutput, gp.numericalSystem, resolvedLanguage);
 
         // Save extended truth files (summaries, subplots, emotional arcs, character matrix)
         await writer.saveNewTruthFiles(bookDir, {
@@ -2583,7 +2752,6 @@ ${matrix}`,
         // Update chapter index
         const existingIndex = await this.state.loadChapterIndex(input.bookId);
         const now = new Date().toISOString();
-        const chapterWordCount = countChapterLength(ch.content, countingMode);
         const newEntry: ChapterMeta = {
           number: chapterNumber,
           title: output.title,
@@ -3365,11 +3533,16 @@ ${matrix}`,
     composed: ComposeChapterOutput;
   }> {
     const plan = await this.resolveGovernedPlan(book, bookDir, chapterNumber, externalContext, options);
+    const composerCtx = this.agentCtxFor("composer", book.id);
+    const composer = new ComposerAgent(composerCtx);
     const composed = await composeGovernedChapter({
       book,
       bookDir,
       chapterNumber,
       plan,
+      contextBudget: contextBudgetFromClient(composerCtx.client),
+      compressibleContextCompiler: (request) => composer.compileCompressibleContext(request),
+      onContextCompression: this.config.onContextCompression,
     });
 
     return { plan, composed };

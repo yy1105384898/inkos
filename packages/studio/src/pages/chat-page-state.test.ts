@@ -8,6 +8,8 @@ import {
   pickProjectChatSessionId,
   setBookCreateSessionId,
   setProjectChatSessionId,
+  isChatScrollNearBottom,
+  shouldShowPlayChoicePanel,
 } from "./chat-page-state";
 
 describe("book-create session localStorage helpers", () => {
@@ -193,6 +195,13 @@ describe("pickProjectChatSessionId", () => {
     ])).toBe("short-fiction-session");
   });
 
+  it("can restore the latest non-chat project session after refresh", () => {
+    expect(pickProjectChatSessionId([
+      { sessionId: "play-session", sessionKind: "play", messageCount: 4 },
+      { sessionId: "old-chat-session", sessionKind: "chat", messageCount: 9 },
+    ])).toBe("play-session");
+  });
+
   it("falls back to the newest empty session when all sessions are empty", () => {
     expect(pickProjectChatSessionId([
       { sessionId: "empty-latest", messageCount: 0 },
@@ -202,5 +211,35 @@ describe("pickProjectChatSessionId", () => {
 
   it("returns null when there is no project chat session", () => {
     expect(pickProjectChatSessionId([])).toBeNull();
+  });
+});
+
+describe("shouldShowPlayChoicePanel", () => {
+  it("does not show choices outside guided Play mode", () => {
+    expect(shouldShowPlayChoicePanel({ playMode: "open", choiceSetKey: "a", consumedChoiceKey: null, choiceCount: 2 })).toBe(false);
+    expect(shouldShowPlayChoicePanel({ playMode: undefined, choiceSetKey: "a", consumedChoiceKey: null, choiceCount: 2 })).toBe(false);
+  });
+
+  it("shows a fresh guided choice set", () => {
+    expect(shouldShowPlayChoicePanel({ playMode: "guided", choiceSetKey: "turn-1", consumedChoiceKey: null, choiceCount: 2 })).toBe(true);
+  });
+
+  it("hides a guided choice set after it has been consumed", () => {
+    expect(shouldShowPlayChoicePanel({ playMode: "guided", choiceSetKey: "turn-1", consumedChoiceKey: "turn-1", choiceCount: 2 })).toBe(false);
+  });
+
+  it("shows choices again when a new tool result creates a new source key", () => {
+    expect(shouldShowPlayChoicePanel({ playMode: "guided", choiceSetKey: "turn-2", consumedChoiceKey: "turn-1", choiceCount: 2 })).toBe(true);
+  });
+});
+
+describe("isChatScrollNearBottom", () => {
+  it("treats the bottom and near-bottom positions as pinned", () => {
+    expect(isChatScrollNearBottom({ scrollTop: 900, clientHeight: 300, scrollHeight: 1200 })).toBe(true);
+    expect(isChatScrollNearBottom({ scrollTop: 830, clientHeight: 300, scrollHeight: 1200 })).toBe(true);
+  });
+
+  it("does not treat a user reading older messages as pinned to the bottom", () => {
+    expect(isChatScrollNearBottom({ scrollTop: 500, clientHeight: 300, scrollHeight: 1200 })).toBe(false);
   });
 });

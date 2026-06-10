@@ -3295,6 +3295,68 @@ describe("PipelineRunner", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("preserves imported chapter body when the analyzer only returns truth-file updates", async () => {
+    const { root, runner, state, bookId } = await createRunnerFixture();
+    const chaptersDir = join(state.bookDir(bookId), "chapters");
+    await state.saveChapterIndex(bookId, [{
+      number: 1,
+      title: "前文",
+      status: "imported",
+      wordCount: 12,
+      createdAt: "2026-03-19T00:00:00.000Z",
+      updatedAt: "2026-03-19T00:00:00.000Z",
+      auditIssues: [],
+      lengthWarnings: [],
+    }]);
+    await writeFile(
+      join(chaptersDir, "0002_旧标题.md"),
+      "# 第2章 旧标题\n\n旧正文不应该在重导入后继续留在目录里。",
+      "utf-8",
+    );
+    const importedBody = [
+      "老丁守了三十年桥，第一次在河灯节后半夜离开值班室。",
+      "",
+      "江面涨水，灯火贴着桥墩漂过去，他在第三个桥洞口捞起一盏湿透的河灯。",
+      "灯芯没有烧完，里面却夹着半张旧照片。",
+    ].join("\n");
+
+    vi.spyOn(ChapterAnalyzerAgent.prototype, "analyzeChapter").mockResolvedValue(
+      createAnalyzedOutput({
+        chapterNumber: 2,
+        title: "河灯还亮着",
+        content: "",
+        wordCount: 0,
+        updatedState: "imported state",
+        updatedLedger: "imported ledger",
+        updatedHooks: "imported hooks",
+      }),
+    );
+    vi.spyOn(WriterAgent.prototype, "saveNewTruthFiles").mockResolvedValue(undefined);
+
+    const result = await runner.importChapters({
+      bookId,
+      resumeFrom: 2,
+      chapters: [
+        { title: "前文", content: "已导入的前文。" },
+        { title: "河灯还亮着", content: importedBody },
+      ],
+    });
+
+    const savedChapter = await readFile(join(chaptersDir, "0002_河灯还亮着.md"), "utf-8");
+    const chapterFiles = await readdir(chaptersDir);
+    const savedIndex = await state.loadChapterIndex(bookId);
+    const expectedCount = countChapterLength(importedBody, "zh_chars");
+
+    expect(result.importedCount).toBe(1);
+    expect(result.totalWords).toBe(expectedCount);
+    expect(savedChapter).toContain(importedBody);
+    expect(chapterFiles).not.toContain("0002_旧标题.md");
+    expect(savedIndex[1]?.wordCount).toBe(expectedCount);
+    expect(savedIndex[1]?.title).toBe("河灯还亮着");
+
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("keeps fanfic initialization running when style guide extraction fails", async () => {
     const { root, runner, state } = await createRunnerFixture();
     const bookId = "fanfic-style-fallback";

@@ -1,3 +1,5 @@
+import type { ActionPayload, ActionSource, PlayMode, RequestedIntent, SessionKind } from "@actalk/inkos-core";
+
 // -- Data types --
 
 export interface ToolCall {
@@ -61,6 +63,8 @@ export interface SessionMessage {
 export interface SessionSummary {
   readonly sessionId: string;
   readonly bookId: string | null;
+  readonly sessionKind?: ChatSessionKind;
+  readonly playMode?: PlayMode;
   readonly title: string | null;
   readonly messageCount: number;
   readonly createdAt: number;
@@ -68,7 +72,6 @@ export interface SessionSummary {
 }
 
 export interface AgentResponse {
-  readonly background?: boolean;
   readonly response?: string;
   readonly error?: string | { code?: string; message?: string };
   readonly details?: {
@@ -78,6 +81,8 @@ export interface AgentResponse {
   readonly session?: {
     readonly sessionId?: string;
     readonly bookId?: string | null;
+    readonly sessionKind?: ChatSessionKind;
+    readonly playMode?: PlayMode;
     readonly title?: string | null;
     readonly activeBookId?: string;
     readonly creationDraft?: unknown;
@@ -90,6 +95,8 @@ export interface SessionResponse {
   readonly session?: {
     readonly sessionId?: string;
     readonly bookId?: string | null;
+    readonly sessionKind?: ChatSessionKind;
+    readonly playMode?: PlayMode;
     readonly title?: string | null;
     readonly activeBookId?: string;
     readonly messages?: ReadonlyArray<SessionMessage>;
@@ -105,9 +112,25 @@ export interface BookSummary {
   cast: string;
 }
 
+export type ChatSessionKind = SessionKind;
+export type ChatActionSource = ActionSource;
+export type ChatRequestedIntent = RequestedIntent;
+export type ChatActionPayload = ActionPayload;
+
+export interface SendMessageOptions {
+  readonly activeBookId?: string;
+  readonly sessionKind?: ChatSessionKind;
+  readonly actionSource?: ChatActionSource;
+  readonly requestedIntent?: ChatRequestedIntent;
+  readonly actionPayload?: ChatActionPayload;
+  readonly playMode?: PlayMode;
+}
+
 export interface SessionRuntime {
   readonly sessionId: string;
   readonly bookId: string | null;
+  readonly sessionKind?: ChatSessionKind;
+  readonly playMode?: PlayMode;
   readonly title: string | null;
   readonly messages: ReadonlyArray<Message>;
   readonly stream: EventSource | null;
@@ -132,6 +155,10 @@ export interface CreateState {
   artifactFile: string | null;         // foundation file name, e.g. "story_bible.md"
   artifactChapter: number | null;      // chapter number, e.g. 1
   bookSummary: BookSummary | null;
+  // Proposed-action cards (propose_action) are one-shot: once confirmed or
+  // rejected, the card locks so the user can't re-fire the production action.
+  // Keyed by the proposal's ToolExecution id.
+  resolvedProposals: Record<string, "confirmed" | "rejected">;
 }
 
 export type ChatState = MessageState & CreateState;
@@ -148,12 +175,13 @@ export interface MessageActions {
   addErrorMessage: (sessionId: string, errorMsg: string) => void;
   loadSessionMessages: (sessionId: string, msgs: ReadonlyArray<SessionMessage>) => void;
   loadSessionList: (bookId: string | null) => Promise<ReadonlyArray<SessionSummary>>;
-  createSession: (bookId: string | null) => Promise<string>;
-  createDraftSession: (bookId: string | null) => string;
+  createSession: (bookId: string | null, sessionKind?: ChatSessionKind, playMode?: PlayMode) => Promise<string>;
+  createDraftSession: (bookId: string | null, sessionKind?: ChatSessionKind, playMode?: PlayMode) => string;
+  setSessionPlayMode: (sessionId: string, playMode: PlayMode) => void;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   loadSessionDetail: (sessionId: string) => Promise<void>;
-  sendMessage: (sessionId: string, text: string, activeBookId?: string) => Promise<void>;
+  sendMessage: (sessionId: string, text: string, options?: SendMessageOptions) => Promise<void>;
   setSelectedModel: (model: string, service: string) => void;
 }
 
@@ -163,6 +191,7 @@ export interface CreateActions {
   openChapterArtifact: (chapterNum: number) => void;
   closeArtifact: () => void;
   setBookSummary: (summary: BookSummary | null) => void;
+  markProposalResolved: (execId: string, resolution: "confirmed" | "rejected") => void;
 }
 
 // -- Composed store type --

@@ -2860,7 +2860,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           bookId: agentBookId,
           sessionId: bookSession.sessionId,
           language: config.language ?? "zh",
-          coverGeneration,
           onEvent: (event) => {
             if (event.type === "message_update") {
               const ame = event.assistantMessageEvent;
