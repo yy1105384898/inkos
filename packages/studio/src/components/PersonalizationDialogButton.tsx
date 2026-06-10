@@ -23,7 +23,7 @@ export function PersonalizationDialogButton({
   className,
   iconClassName,
   iconSize = 13,
-  label = "个性化",
+  label = "记忆设置",
 }: PersonalizationDialogButtonProps) {
   const [open, setOpen] = useState(false);
   const [memory, setMemory] = useState("");
