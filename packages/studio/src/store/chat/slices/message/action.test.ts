@@ -68,6 +68,27 @@ describe("chat message actions", () => {
     expect(fetchJson).not.toHaveBeenCalled();
   });
 
+  it("does not overwrite the persisted default model during automatic restore", () => {
+    const store = createTestStore();
+
+    store.getState().setSelectedModel("gpt-5.2", "yynewapi", { persist: false });
+
+    expect(store.getState().selectedModel).toBe("gpt-5.2");
+    expect(store.getState().selectedService).toBe("yynewapi");
+    expect(fetchJson).not.toHaveBeenCalled();
+  });
+
+  it("persists the default model when the user selects it", () => {
+    const store = createTestStore();
+
+    store.getState().setSelectedModel("gpt-5.2", "yynewapi");
+
+    expect(fetchJson).toHaveBeenCalledWith("/services/config", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({ service: "yynewapi", defaultModel: "gpt-5.2" }),
+    }));
+  });
+
   it("stops the agent run through the active stop endpoint", async () => {
     const store = createTestStore();
     const sessionId = store.getState().createDraftSession(null, "book-create");

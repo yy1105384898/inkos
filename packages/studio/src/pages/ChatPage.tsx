@@ -162,7 +162,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       configuredModelSelection,
     );
     if (nextSelection) {
-      setSelectedModel(nextSelection.model, nextSelection.service);
+      setSelectedModel(nextSelection.model, nextSelection.service, { persist: false });
     }
   }, [configuredModelSelection, groupedModels, selectedModel, selectedService, serviceConfigLoaded, setSelectedModel]);
 

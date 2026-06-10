@@ -74,6 +74,7 @@ export interface SessionSummary {
 export interface AgentResponse {
   readonly response?: string;
   readonly error?: string | { code?: string; message?: string };
+  readonly background?: boolean;
   readonly details?: {
     readonly draftRaw?: string;
     readonly toolCall?: ToolCall;
@@ -183,7 +184,7 @@ export interface MessageActions {
   loadSessionDetail: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, text: string, options?: SendMessageOptions) => Promise<void>;
   stopMessage: (sessionId: string) => Promise<void>;
-  setSelectedModel: (model: string, service: string) => void;
+  setSelectedModel: (model: string, service: string, options?: { readonly persist?: boolean }) => void;
 }
 
 export interface CreateActions {

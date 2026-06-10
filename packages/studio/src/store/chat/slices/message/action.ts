@@ -118,12 +118,14 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       };
     }),
 
-  setSelectedModel: (model, service) => {
-    void fetchJson("/services/config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ service, defaultModel: model }),
-    }).catch(() => undefined);
+  setSelectedModel: (model, service, options) => {
+    if (options?.persist !== false) {
+      void fetchJson("/services/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service, defaultModel: model }),
+      }).catch(() => undefined);
+    }
     set({ selectedModel: model, selectedService: service });
   },
 
@@ -388,6 +390,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       sessions: updateSession(state.sessions, sessionId, () => ({ stream: streamEs })),
     }));
     attachSessionStreamListeners({ sessionId, streamTs, streamEs, set, get });
+    let keepStreamOpen = false;
 
     try {
       const data = await fetchJson<AgentResponse>("/agent", {
@@ -406,8 +409,6 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
           service: get().selectedService ?? undefined,
         }),
       });
-
-      streamEs.close();
 
       const finalContent = data.details?.draftRaw || data.response || "";
       const toolCall = data.details?.toolCall ?? undefined;
@@ -435,6 +436,12 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
           };
         });
       }
+      if (data.background) {
+        keepStreamOpen = true;
+        return;
+      }
+
+      streamEs.close();
       const hasStream = Boolean(
         get().sessions[sessionId]?.messages.some((message) => message.timestamp === streamTs),
       );
@@ -484,6 +491,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         get().addErrorMessage(sessionId, errorMessage);
       }
     } finally {
+      if (keepStreamOpen) return;
       set((state) => ({
         sessions: updateSession(state.sessions, sessionId, (runtime) => ({
           isStreaming: false,

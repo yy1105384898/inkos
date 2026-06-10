@@ -264,6 +264,7 @@ export function settleStreamingMessage(
   messages: ReadonlyArray<Message>,
   reason = "Stopped",
   completedAt = Date.now(),
+  status: "error" | "completed" = "error",
 ): ReadonlyArray<Message> {
   const last = messages[messages.length - 1];
   if (!last || last.role !== "assistant" || !last.parts?.length) return messages;
@@ -283,8 +284,8 @@ export function settleStreamingMessage(
         ...part,
         execution: {
           ...part.execution,
-          status: "error",
-          error: reason,
+          status,
+          ...(status === "error" ? { error: reason } : {}),
           completedAt,
         },
       };

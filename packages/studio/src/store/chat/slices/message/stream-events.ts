@@ -10,6 +10,7 @@ import {
   replaceLast,
   resolveToolLabel,
   sessionMatchesEvent,
+  settleStreamingMessage,
   summarizeResult,
   updateSession,
 } from "./runtime";
@@ -298,6 +299,42 @@ export function attachSessionStreamListeners({
           const flat = deriveFlat(parts);
           return { messages: replaceLast(messages, { ...stream, ...flat, parts }) };
         }),
+      }));
+    } catch {
+      // ignore
+    }
+  });
+
+  streamEs.addEventListener("agent:complete", (event: MessageEvent) => {
+    try {
+      const data = event.data ? JSON.parse(event.data) : null;
+      if (!sessionMatchesEvent(sessionId, data)) return;
+      streamEs.close();
+      set((state) => ({
+        sessions: updateSession(state.sessions, sessionId, (runtime) => ({
+          isStreaming: false,
+          stream: runtime.stream === streamEs ? null : runtime.stream,
+          messages: settleStreamingMessage(runtime.messages, "Completed", Date.now(), "completed"),
+        })),
+      }));
+    } catch {
+      // ignore
+    }
+  });
+
+  streamEs.addEventListener("agent:error", (event: MessageEvent) => {
+    try {
+      const data = event.data ? JSON.parse(event.data) : null;
+      if (!sessionMatchesEvent(sessionId, data)) return;
+      const message = typeof data?.error === "string" ? data.error : "执行失败";
+      streamEs.close();
+      set((state) => ({
+        sessions: updateSession(state.sessions, sessionId, (runtime) => ({
+          isStreaming: false,
+          stream: runtime.stream === streamEs ? null : runtime.stream,
+          lastError: message,
+          messages: settleStreamingMessage(runtime.messages, message),
+        })),
       }));
     } catch {
       // ignore
