@@ -174,8 +174,18 @@ describe("pickModelSelection", () => {
     });
   });
 
-  it("keeps a valid user selection over the configured default", () => {
+  it("restores the configured default over a temporary auto fallback", () => {
     expect(pickModelSelection(grouped, "gemini-2.5-flash", "google", {
+      service: "moonshot",
+      model: "kimi-k2.5",
+    })).toEqual({
+      model: "kimi-k2.5",
+      service: "moonshot",
+    });
+  });
+
+  it("keeps the current selection when it matches the configured default", () => {
+    expect(pickModelSelection(grouped, "kimi-k2.5", "moonshot", {
       service: "moonshot",
       model: "kimi-k2.5",
     })).toBeNull();

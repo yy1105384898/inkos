@@ -67,6 +67,18 @@ export function pickModelSelection(
   selectedService: string | null,
   preference?: ChatPageModelPreference | null,
 ): { model: string; service: string } | null {
+  const preferredService = preference?.service?.trim();
+  const preferredModel = preference?.model?.trim();
+  if (preferredService) {
+    const preferredGroup = groupedModels.find((group) => group.service === preferredService);
+    const exactModel = preferredModel
+      ? preferredGroup?.models.find((model) => model.id === preferredModel)
+      : undefined;
+    if (preferredGroup && exactModel && (selectedModel !== exactModel.id || selectedService !== preferredGroup.service)) {
+      return { model: exactModel.id, service: preferredGroup.service };
+    }
+  }
+
   const selectedStillAvailable = selectedModel && selectedService
     ? groupedModels.some((group) =>
         group.service === selectedService
@@ -75,8 +87,6 @@ export function pickModelSelection(
     : false;
   if (selectedStillAvailable) return null;
 
-  const preferredService = preference?.service?.trim();
-  const preferredModel = preference?.model?.trim();
   if (preferredService) {
     const preferredGroup = groupedModels.find((group) => group.service === preferredService);
     const exactModel = preferredModel

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useMemo, useState, useCallback } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
@@ -165,6 +165,11 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       setSelectedModel(nextSelection.model, nextSelection.service, { persist: false });
     }
   }, [configuredModelSelection, groupedModels, selectedModel, selectedService, serviceConfigLoaded, setSelectedModel]);
+
+  const handleModelSelect = useCallback((model: string, service: string) => {
+    setConfiguredModelSelection({ model, service });
+    setSelectedModel(model, service);
+  }, [setSelectedModel]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -439,7 +444,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                       groupedModels={groupedModels}
                       selectedModel={selectedModel}
                       selectedService={selectedService}
-                      onSelect={setSelectedModel}
+                      onSelect={handleModelSelect}
                       onManage={() => nav.toServices()}
                     />
                   </DropdownMenu>
