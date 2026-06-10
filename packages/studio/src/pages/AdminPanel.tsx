@@ -12,10 +12,18 @@ interface InviteRecord {
   readonly usedAt?: string;
 }
 
+interface AdminBookSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly genre?: string;
+  readonly status?: string;
+  readonly updatedAt?: string;
+}
+
 interface OwnerSummary {
   readonly userId: string;
   readonly username: string;
-  readonly books: ReadonlyArray<string>;
+  readonly books: ReadonlyArray<AdminBookSummary>;
 }
 
 interface AdminPanelProps {
@@ -243,12 +251,18 @@ function InvitesSection({
 }) {
   const [role, setRole] = useState<"admin" | "user">("user");
   const [ttlHours, setTtlHours] = useState(168);
+  const [ttlPreset, setTtlPreset] = useState("168");
+
+  const updateTtlPreset = (value: string) => {
+    setTtlPreset(value);
+    if (value !== "custom") setTtlHours(Number(value));
+  };
 
   return (
     <section className="space-y-4">
       <h2 className="text-lg font-semibold">邀请码</h2>
       <div className="rounded-md border p-4 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
           <select
             className="rounded border bg-background px-2 py-1 text-sm"
             value={role}
@@ -257,11 +271,26 @@ function InvitesSection({
             <option value="user">user</option>
             <option value="admin">admin</option>
           </select>
+          <select
+            className="rounded border bg-background px-2 py-1 text-sm"
+            value={ttlPreset}
+            onChange={(e) => updateTtlPreset(e.target.value)}
+          >
+            <option value="24">1 天</option>
+            <option value="168">7 天</option>
+            <option value="720">30 天</option>
+            <option value="custom">自定义小时</option>
+          </select>
           <input
             type="number"
             className="rounded border bg-background px-2 py-1 text-sm"
             value={ttlHours}
-            onChange={(e) => setTtlHours(parseInt(e.target.value, 10) || 1)}
+            min={1}
+            max={8760}
+            onChange={(e) => {
+              setTtlPreset("custom");
+              setTtlHours(parseInt(e.target.value, 10) || 1);
+            }}
             placeholder="有效期(小时)"
           />
           <button
@@ -293,33 +322,35 @@ function InvitesSection({
             </tr>
           </thead>
           <tbody>
-            {invites.map((inv) => (
-              <tr key={inv.code} className="border-t">
-                <td className="px-3 py-2 font-mono text-xs">{inv.code}</td>
-                <td className="px-3 py-2">{inv.role}</td>
-                <td className="px-3 py-2 text-xs text-muted-foreground">
-                  {new Date(inv.expiresAt).toLocaleString()}
-                </td>
-                <td className="px-3 py-2 text-xs">
-                  {inv.usedBy ? `已被 ${inv.usedBy} 使用` : "未使用"}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    className="text-xs text-destructive underline disabled:opacity-50"
-                    disabled={busy}
-                    onClick={() =>
-                      guarded(() =>
-                        fetchJson(`/admin/invites/${encodeURIComponent(inv.code)}`, {
-                          method: "DELETE",
-                        }),
-                      )
-                    }
-                  >
-                    撤销
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {invites.map((inv) => {
+              const expired = new Date(inv.expiresAt).getTime() <= Date.now();
+              const status = inv.usedBy ? `已被 ${inv.usedBy} 使用` : expired ? "已过期" : "未使用";
+              return (
+                <tr key={inv.code} className="border-t">
+                  <td className="px-3 py-2 font-mono text-xs">{inv.code}</td>
+                  <td className="px-3 py-2">{inv.role}</td>
+                  <td className="px-3 py-2 text-xs text-muted-foreground">
+                    {new Date(inv.expiresAt).toLocaleString()}
+                  </td>
+                  <td className="px-3 py-2 text-xs">{status}</td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      className="text-xs text-destructive underline disabled:opacity-50"
+                      disabled={busy}
+                      onClick={() =>
+                        guarded(() =>
+                          fetchJson(`/admin/invites/${encodeURIComponent(inv.code)}`, {
+                            method: "DELETE",
+                          }),
+                        )
+                      }
+                    >
+                      撤销
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
             {invites.length === 0 && (
               <tr>
                 <td className="px-3 py-4 text-center text-xs text-muted-foreground" colSpan={5}>
@@ -347,23 +378,31 @@ function BooksSection({
 }) {
   return (
     <section className="space-y-4">
-      <h2 className="text-lg font-semibold">小说归属与转移</h2>
+      <h2 className="text-lg font-semibold">全站书籍</h2>
       <div className="space-y-3">
         {owners.map((owner) => (
           <div key={owner.userId} className="rounded-md border p-4 space-y-2">
             <div className="text-sm font-semibold">
-              {owner.username}{" "}
+              作者 / 用户：{owner.username}{" "}
               <span className="text-xs text-muted-foreground">({owner.books.length} 本)</span>
             </div>
             {owner.books.length === 0 ? (
               <div className="text-xs text-muted-foreground">无</div>
             ) : (
-              <ul className="space-y-1">
-                {owner.books.map((bookId) => (
-                  <li key={bookId} className="flex items-center gap-2">
-                    <span className="font-mono text-xs">{bookId}</span>
+              <ul className="space-y-2">
+                {owner.books.map((book) => (
+                  <li key={book.id} className="flex flex-col gap-2 rounded border bg-muted/20 p-3 md:flex-row md:items-center md:justify-between">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{book.title}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span className="font-mono">{book.id}</span>
+                        {book.genre && <span>{book.genre}</span>}
+                        {book.status && <span>{book.status}</span>}
+                        {book.updatedAt && <span>{new Date(book.updatedAt).toLocaleString()}</span>}
+                      </div>
+                    </div>
                     <select
-                      className="rounded border bg-background px-2 py-1 text-xs"
+                      className="w-full rounded border bg-background px-2 py-1 text-xs md:w-auto"
                       defaultValue=""
                       disabled={busy}
                       onChange={(e) => {
@@ -372,13 +411,13 @@ function BooksSection({
                         if (!target) return;
                         if (
                           !window.confirm(
-                            `把 ${bookId} 从 ${owner.username} 转给 ${target}?`,
+                            `把《${book.title}》从 ${owner.username} 转给 ${target}?`,
                           )
                         )
                           return;
                         void guarded(() =>
                           fetchJson(
-                            `/admin/books/${owner.userId}/${encodeURIComponent(bookId)}/transfer`,
+                            `/admin/books/${owner.userId}/${encodeURIComponent(book.id)}/transfer`,
                             {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },

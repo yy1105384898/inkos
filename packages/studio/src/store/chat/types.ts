@@ -182,6 +182,7 @@ export interface MessageActions {
   deleteSession: (sessionId: string) => Promise<void>;
   loadSessionDetail: (sessionId: string) => Promise<void>;
   sendMessage: (sessionId: string, text: string, options?: SendMessageOptions) => Promise<void>;
+  stopMessage: (sessionId: string) => Promise<void>;
   setSelectedModel: (model: string, service: string) => void;
 }
 

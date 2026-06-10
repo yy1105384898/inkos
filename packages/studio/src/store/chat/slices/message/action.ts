@@ -8,7 +8,7 @@ import type {
   SessionResponse,
   SessionSummary,
 } from "../../types";
-import { fetchJson } from "../../../../hooks/use-api";
+import { buildApiUrl, fetchJson } from "../../../../hooks/use-api";
 import { attachSessionStreamListeners } from "./stream-events";
 import {
   bookKey,
@@ -17,6 +17,7 @@ import {
   deserializeMessages,
   extractErrorMessage,
   mergeSessionIds,
+  settleStreamingMessage,
   updateSession,
   upsertSessionSummary,
 } from "./runtime";
@@ -117,7 +118,14 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       };
     }),
 
-  setSelectedModel: (model, service) => set({ selectedModel: model, selectedService: service }),
+  setSelectedModel: (model, service) => {
+    void fetchJson("/services/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service, defaultModel: model }),
+    }).catch(() => undefined);
+    set({ selectedModel: model, selectedService: service });
+  },
 
   loadSessionList: async (bookId) => {
     const query = bookId === null ? "null" : encodeURIComponent(bookId);
@@ -375,7 +383,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
     get().addUserMessage(sessionId, trimmed);
     session.stream?.close();
-    const streamEs = new EventSource("/api/v1/events");
+    const streamEs = new EventSource(buildApiUrl("/events") ?? "/api/v1/events");
     set((state) => ({
       sessions: updateSession(state.sessions, sessionId, () => ({ stream: streamEs })),
     }));
@@ -483,5 +491,18 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         })),
       }));
     }
+  },
+
+  stopMessage: async (sessionId) => {
+    const runtime = get().sessions[sessionId];
+    runtime?.stream?.close();
+    set((state) => ({
+      sessions: updateSession(state.sessions, sessionId, () => ({
+        isStreaming: false,
+        stream: null,
+        messages: runtime ? settleStreamingMessage(runtime.messages, "Stopped") : undefined,
+      })),
+    }));
+    await fetchJson(`/sessions/${sessionId}/stop`, { method: "POST" }).catch(() => undefined);
   },
 });

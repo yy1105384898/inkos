@@ -408,7 +408,7 @@ const SubAgentParams = Type.Object({
   chapterNumber: Type.Optional(Type.Number({ description: "auditor/reviser: target chapter number. Omit to use the latest chapter." })),
   // -- architect params --
   title: Type.Optional(Type.String({ description: "architect only: explicit book title. Required when creating a book." })),
-  genre: Type.Optional(Type.String({ description: "architect only: genre (xuanhuan, urban, mystery, romance, scifi, fantasy, wuxia, general, etc.)" })),
+  genre: Type.Optional(Type.String({ description: "architect only: genre (xuanhuan, xianxia, urban, horror, mystery, detective, crime, historical, court-politics, officialdom, palace, kehuan, cyberpunk, space-opera, mecha, wuxia, fantasy, western-fantasy, infinite-flow, system-flow, romance, game, e-sports, apocalypse, survival, supernatural, fanfic-zh, brain-hole, workplace, business, legal, medical, entertainment, live-stream, farming, food, rebirth, transmigration, quick-transmigration, beast-taming, summoning, antihero, etc.)" })),
   platform: Type.Optional(Type.Union([
     Type.Literal("tomato"),
     Type.Literal("qidian"),
@@ -1542,6 +1542,39 @@ function playEditEntityId(type: string, label: string): string {
 // ---------------------------------------------------------------------------
 // 5. Deterministic writing tools
 // ---------------------------------------------------------------------------
+
+const ImportStyleParams = Type.Object({
+  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
+  referenceText: Type.String({ description: "Reference prose sample. Use when the user provides text and asks to learn, imitate, or apply a writing style." }),
+  sourceName: Type.Optional(Type.String({ description: "Optional source label for the style sample." })),
+});
+
+export function createImportStyleTool(
+  pipeline: PipelineRunner,
+  activeBookId: string | null,
+): AgentTool<typeof ImportStyleParams> {
+  return {
+    name: "import_style",
+    description: "Analyze a reference text and save story/style_profile.json plus story/style_guide.md for the active book. Use this before writing when the user asks to adopt a style.",
+    label: "Import Style",
+    parameters: ImportStyleParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
+      try {
+        const bookId = resolveToolBookId("import_style", params.bookId, activeBookId);
+        const guide = await pipeline.generateStyleGuide(bookId, params.referenceText, params.sourceName);
+        return textResult(
+          [
+            `Imported style guide for "${bookId}".`,
+            "Files updated: story/style_profile.json, story/style_guide.md.",
+            `Guide length: ${guide.length} chars.`,
+          ].join("\n"),
+        );
+      } catch (err: any) {
+        return textResult(`import_style failed: ${err?.message ?? String(err)}`);
+      }
+    },
+  };
+}
 
 const WriteTruthFileParams = Type.Object({
   bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),

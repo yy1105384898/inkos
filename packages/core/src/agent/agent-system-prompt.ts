@@ -5,6 +5,7 @@ export interface AgentSystemPromptOptions {
   readonly actionSource?: ActionSource;
   readonly requestedIntent?: RequestedIntent;
   readonly playWorldExists?: boolean;
+  readonly personalizationMemory?: string;
 }
 
 function isConfirmedAction(
@@ -413,18 +414,37 @@ export function buildAgentSystemPrompt(
   options: AgentSystemPromptOptions = {},
 ): string {
   const isZh = language === "zh";
+  const personalizationBlock = buildPersonalizationBlock(options.personalizationMemory, isZh);
+  const appendPersonalization = (prompt: string): string =>
+    personalizationBlock ? `${prompt}\n\n${personalizationBlock}` : prompt;
 
-  if (sessionKind === "book-create") return buildBookCreatePrompt(isZh, isConfirmedAction(options, "create_book"));
+  if (sessionKind === "book-create") return appendPersonalization(buildBookCreatePrompt(isZh, isConfirmedAction(options, "create_book")));
   if (sessionKind === "short") {
     const confirmedIntent = isConfirmedAction(options, "short_run")
       ? "short_run"
       : isConfirmedAction(options, "generate_cover")
         ? "generate_cover"
         : undefined;
-    return buildShortPrompt(isZh, confirmedIntent);
+    return appendPersonalization(buildShortPrompt(isZh, confirmedIntent));
   }
-  if (sessionKind === "play") return buildPlayPrompt(isZh, isConfirmedAction(options, "play_start"), options.playWorldExists === true);
-  if (sessionKind === "edit") return buildEditPrompt(bookId, isZh);
-  if (sessionKind === "book" && bookId) return buildBookPrompt(bookId, isZh);
-  return buildChatPrompt(isZh);
+  if (sessionKind === "play") return appendPersonalization(buildPlayPrompt(isZh, isConfirmedAction(options, "play_start"), options.playWorldExists === true));
+  if (sessionKind === "edit") return appendPersonalization(buildEditPrompt(bookId, isZh));
+  if (sessionKind === "book" && bookId) return appendPersonalization(buildBookPrompt(bookId, isZh));
+  return appendPersonalization(buildChatPrompt(isZh));
+}
+
+function buildPersonalizationBlock(memory: string | undefined, isZh: boolean): string {
+  const trimmed = memory?.trim();
+  if (!trimmed) return "";
+  return isZh
+    ? `## 个性化/模型记忆
+
+以下是用户保存的长期回复与创作约束，优先遵守；若与安全、工具权限或当前明确指令冲突，以更高优先级规则为准。
+
+${trimmed}`
+    : `## Personalization / Model Memory
+
+The following are saved long-term response and writing constraints from the user. Follow them unless they conflict with safety, tool permissions, or the user's current explicit instruction.
+
+${trimmed}`;
 }

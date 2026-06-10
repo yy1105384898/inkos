@@ -24,9 +24,11 @@ import {
   createReadTool,
   createGrepTool,
   createLsTool,
+  createImportStyleTool,
   createWriteTruthFileTool,
   createShortFictionRunTool,
   createGenerateCoverTool,
+  createUpdateChapterTitleTool,
   createPlayEditTool,
   createPlayReviseTool,
   createPlayStartTool,
@@ -86,6 +88,8 @@ export interface AgentSessionConfig {
   onEvent?: (event: AgentEvent) => void;
   /** Optional listener for context compression lifecycle events. */
   onContextCompression?: ContextCompressionCallback;
+  /** Saved project-level response and writing constraints. */
+  personalizationMemory?: string;
 }
 
 export interface AgentSessionResult {
@@ -115,6 +119,7 @@ interface CachedAgent {
   modelIdentity: string;
   apiKey: string | undefined;
   allowSystemFileRead: boolean;
+  personalizationIdentity: string;
   lastCommittedSeq: number;
   lastActive: number;
 }
@@ -692,8 +697,10 @@ function createAgentToolsForMode(params: {
     subAgentTool,
     createGenerateCoverTool(params.projectRoot, { actionPayload: params.actionPayload }),
     createReadTool(params.projectRoot, { allowSystemPaths: params.allowSystemFileRead }),
+    createImportStyleTool(params.pipeline, params.bookId),
     createWriteTruthFileTool(params.pipeline, params.projectRoot, params.bookId),
     createRenameEntityTool(params.pipeline, params.projectRoot, params.bookId),
+    createUpdateChapterTitleTool(params.projectRoot, params.bookId),
     createPatchChapterTextTool(params.pipeline, params.projectRoot, params.bookId),
     createReplaceChapterTextTool(params.pipeline, params.projectRoot, params.bookId),
     createGrepTool(params.projectRoot),
@@ -748,6 +755,7 @@ async function runAgentSessionUnlocked(
   const playWorldExists = sessionKind === "play"
     ? Boolean(await new PlayStore(projectRoot).loadWorld(sessionId))
     : false;
+  const personalizationIdentity = config.personalizationMemory?.trim() ?? "";
   const cacheKey = agentCacheKey(projectRoot, sessionId);
 
   // ----- Resolve or create Agent -----
@@ -771,6 +779,7 @@ async function runAgentSessionUnlocked(
     const apiKeyChanged = cached.apiKey !== config.apiKey;
     const readPermissionChanged = cached.allowSystemFileRead !== allowSystemFileRead;
     const playWorldChanged = cached.playWorldExists !== playWorldExists;
+    const personalizationChanged = cached.personalizationIdentity !== personalizationIdentity;
     const transcriptChanged = cached.lastCommittedSeq !== currentCommittedSeq;
 
     if (
@@ -785,6 +794,7 @@ async function runAgentSessionUnlocked(
       apiKeyChanged ||
       readPermissionChanged ||
       playWorldChanged ||
+      personalizationChanged ||
       transcriptChanged
     ) {
       agentCache.delete(cacheKey);
@@ -822,7 +832,12 @@ async function runAgentSessionUnlocked(
     const agent = new Agent({
       initialState: {
         model,
-        systemPrompt: buildAgentSystemPrompt(bookId, language, sessionKind, { actionSource, requestedIntent, playWorldExists }),
+        systemPrompt: buildAgentSystemPrompt(bookId, language, sessionKind, {
+          actionSource,
+          requestedIntent,
+          playWorldExists,
+          personalizationMemory: config.personalizationMemory,
+        }),
         tools: createAgentToolsForMode({
           pipeline,
           bookId,
@@ -871,6 +886,7 @@ async function runAgentSessionUnlocked(
       modelIdentity: requestedModelIdentity,
       apiKey: config.apiKey,
       allowSystemFileRead,
+      personalizationIdentity,
       lastCommittedSeq: currentCommittedSeq ?? await latestCommittedSeq(projectRoot, sessionId),
       lastActive: Date.now(),
     };
@@ -1030,4 +1046,22 @@ export function evictAgentCache(sessionId: string): boolean {
     deleted = true;
   }
   return deleted;
+}
+
+/** Abort and evict a currently running cached Agent session. */
+export function abortAgentSession(sessionId: string, projectRoot?: string): boolean {
+  let aborted = false;
+  for (const [key, entry] of agentCache) {
+    if (entry.sessionId !== sessionId) continue;
+    if (projectRoot && entry.projectRoot !== projectRoot) continue;
+    const abortable = entry.agent as Agent & {
+      clearAllQueues?: () => void;
+      abort?: () => void;
+    };
+    abortable.clearAllQueues?.();
+    abortable.abort?.();
+    agentCache.delete(key);
+    aborted = true;
+  }
+  return aborted;
 }

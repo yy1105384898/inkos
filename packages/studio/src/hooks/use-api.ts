@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { localizeKnownRuntimeMessage } from "../lib/error-copy";
 import { buildApiPath, buildApiUrl } from "../lib/api-base";
 import { apiFetch } from "../lib/api-client";
@@ -124,6 +124,8 @@ export function useApi<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedDataRef = useRef(false);
+  const lastApiPathRef = useRef<string | null>(null);
 
   const refetch = useCallback(async () => {
     const apiPath = buildApiPath(path);
@@ -131,13 +133,24 @@ export function useApi<T>(path: string) {
       setData(null);
       setError(null);
       setLoading(false);
+      hasLoadedDataRef.current = false;
+      lastApiPathRef.current = null;
       return;
     }
 
-    setLoading(true);
+    if (lastApiPathRef.current !== apiPath) {
+      lastApiPathRef.current = apiPath;
+      hasLoadedDataRef.current = false;
+      setData(null);
+    }
+
+    if (!hasLoadedDataRef.current) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const json = await fetchJson<T>(apiPath);
+      hasLoadedDataRef.current = true;
       setData(json);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

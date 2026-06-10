@@ -853,6 +853,7 @@ describe("runAgentSession cache — bookId switch", () => {
       "sub_agent",
       "generate_cover",
       "read",
+      "import_style",
       "write_truth_file",
       "rename_entity",
       "update_chapter_title",

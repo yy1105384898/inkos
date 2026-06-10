@@ -160,8 +160,21 @@ describe("chatCompletion via pi-ai", () => {
     expect(mockStreamSimple).toHaveBeenCalledOnce();
   });
 
-  it("throws when stream produces no text content", async () => {
+  it("falls back to non-stream completion when stream produces no text content", async () => {
     mockStreamSimple.mockReturnValue(makeEmptyStream());
+    mockCompleteSimple.mockResolvedValue(makeAssistantMessage("fallback text"));
+
+    const client = makeClient();
+    const result = await chatCompletion(client, "test-model", [{ role: "user", content: "ping" }]);
+
+    expect(result.content).toBe("fallback text");
+    expect(mockStreamSimple).toHaveBeenCalledOnce();
+    expect(mockCompleteSimple).toHaveBeenCalledOnce();
+  });
+
+  it("throws when stream and non-stream fallback both produce no text content", async () => {
+    mockStreamSimple.mockReturnValue(makeEmptyStream());
+    mockCompleteSimple.mockResolvedValue(makeAssistantMessage(""));
 
     const client = makeClient();
     const error = await captureError(
@@ -169,6 +182,7 @@ describe("chatCompletion via pi-ai", () => {
     );
 
     expect(error.message).toContain("empty response");
+    expect(error.message).toContain("fallback failed");
   });
 
   it("wraps 400 API errors with a user-friendly message", async () => {

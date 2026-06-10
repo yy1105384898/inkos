@@ -3,7 +3,10 @@ import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import { useColors } from "../hooks/use-colors";
 import { fetchJson } from "../hooks/use-api";
+import { getServerServiceSelection } from "../lib/server-service-config";
+import { useChatStore } from "../store/chat";
 import { TrendingUp, Loader2, Target, Clock } from "lucide-react";
+import { buildRadarScanBody, type RadarModelSelection } from "./radar-view-state";
 
 interface Recommendation {
   readonly confidence: number;
@@ -30,8 +33,11 @@ interface Nav { toDashboard: () => void }
 
 export function RadarView({ nav, theme, t }: { nav: Nav; theme: Theme; t: TFunction }) {
   const c = useColors(theme);
+  const selectedModel = useChatStore((s) => s.selectedModel);
+  const selectedService = useChatStore((s) => s.selectedService);
   const [result, setResult] = useState<RadarResult | null>(null);
   const [history, setHistory] = useState<ReadonlyArray<RadarHistoryItem>>([]);
+  const [configuredModelSelection, setConfiguredModelSelection] = useState<RadarModelSelection | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -48,15 +54,38 @@ export function RadarView({ nav, theme, t }: { nav: Nav; theme: Theme; t: TFunct
     void loadHistory();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const selection = await getServerServiceSelection();
+        if (!cancelled) {
+          setConfiguredModelSelection(selection
+            ? { configuredService: selection.service, configuredModel: selection.model }
+            : null);
+        }
+      } catch {
+        if (!cancelled) setConfiguredModelSelection(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const handleScan = async () => {
     setLoading(true);
     setError("");
     setResult(null);
+    const body = buildRadarScanBody({
+      selectedModel,
+      selectedService,
+      configuredModel: configuredModelSelection?.configuredModel,
+      configuredService: configuredModelSelection?.configuredService,
+    });
     try {
       const data = await fetchJson<RadarResult>("/radar/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       });
       setResult(data);
       await loadHistory();

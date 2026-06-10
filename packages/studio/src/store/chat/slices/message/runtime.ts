@@ -260,6 +260,54 @@ export function updateSession(
   };
 }
 
+export function settleStreamingMessage(
+  messages: ReadonlyArray<Message>,
+  reason = "Stopped",
+  completedAt = Date.now(),
+): ReadonlyArray<Message> {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant" || !last.parts?.length) return messages;
+
+  let changed = false;
+  const parts: MessagePart[] = last.parts.map((part) => {
+    if (part.type === "thinking" && part.streaming) {
+      changed = true;
+      return { ...part, streaming: false };
+    }
+    if (
+      part.type === "tool"
+      && (part.execution.status === "running" || part.execution.status === "processing")
+    ) {
+      changed = true;
+      return {
+        ...part,
+        execution: {
+          ...part.execution,
+          status: "error",
+          error: reason,
+          completedAt,
+        },
+      };
+    }
+    return part;
+  });
+
+  if (!changed) return messages;
+
+  const flat = deriveFlat(parts);
+  const updated: Message = {
+    role: "assistant",
+    content: flat.content,
+    timestamp: last.timestamp,
+    ...(flat.thinking ? { thinking: flat.thinking } : {}),
+    ...(flat.thinkingStreaming ? { thinkingStreaming: true } : {}),
+    ...(flat.toolExecutions ? { toolExecutions: flat.toolExecutions } : {}),
+    ...(last.toolCall ? { toolCall: last.toolCall } : {}),
+    parts,
+  };
+  return replaceLast(messages, updated);
+}
+
 export function upsertSessionSummary(
   sessions: Record<string, SessionRuntime>,
   summary: Pick<SessionSummary, "sessionId" | "bookId" | "sessionKind" | "playMode" | "title">,

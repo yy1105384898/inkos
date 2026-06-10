@@ -24,12 +24,14 @@ import {
   type ProjectConfig,
   type UserRecord,
 } from "@actalk/inkos-core";
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createStudioServer } from "./server.js";
 
 export const SESSION_COOKIE = "inkos_sid";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_INVITE_TTL_HOURS = 24 * 7;
+const MAX_INVITE_TTL_HOURS = 24 * 365;
 
 function shouldUseCrossSiteCookie(c: { req: { header(name: string): string | undefined; url: string } }): boolean {
   const origin = c.req.header("Origin");
@@ -68,6 +70,14 @@ interface PerUserApp {
 interface CachedUserServer {
   readonly app: PerUserApp;
   readonly projectRoot: string;
+}
+
+interface AdminBookSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly genre?: string;
+  readonly status?: string;
+  readonly updatedAt?: string;
 }
 
 export interface CreateMultiUserStudioOptions {
@@ -328,7 +338,16 @@ export async function createMultiUserStudioServer(
     const body = await readJsonBody<{ role?: "admin" | "user"; ttlHours?: number }>(c);
     const current = c.get("currentUser");
     if (!current) return c.json({ error: { code: "UNAUTHENTICATED", message: "未登录" } }, 401);
-    const ttlMs = Math.max(1, body?.ttlHours ?? 24 * 7) * 60 * 60 * 1000;
+    const ttlHours = body?.ttlHours ?? DEFAULT_INVITE_TTL_HOURS;
+    if (!Number.isFinite(ttlHours) || ttlHours < 1 || ttlHours > MAX_INVITE_TTL_HOURS) {
+      return c.json({
+        error: {
+          code: "INVALID_BODY",
+          message: `有效期必须在 1 到 ${MAX_INVITE_TTL_HOURS} 小时之间`,
+        },
+      }, 400);
+    }
+    const ttlMs = ttlHours * 60 * 60 * 1000;
     const invite = await createInvite(dataRoot, {
       createdBy: current.id,
       role: body?.role ?? "user",
@@ -344,19 +363,32 @@ export async function createMultiUserStudioServer(
 
   app.get("/api/v1/admin/books", async (c) => {
     const users = await listUsers(dataRoot);
-    const result: Array<{ userId: string; username: string; books: string[] }> = [];
+    const result: Array<{ userId: string; username: string; books: AdminBookSummary[] }> = [];
     for (const user of users) {
       const booksDir = join(userProjectRoot(dataRoot, user.id), "books");
       try {
         const entries = await readdir(booksDir, { withFileTypes: true });
-        const books: string[] = [];
+        const books: AdminBookSummary[] = [];
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
+          const id = entry.name;
           try {
-            await stat(join(booksDir, entry.name, "book.json"));
-            books.push(entry.name);
+            const raw = await readFile(join(booksDir, id, "book.json"), "utf-8");
+            const book = JSON.parse(raw) as Record<string, unknown>;
+            books.push({
+              id,
+              title: typeof book.title === "string" && book.title.trim() ? book.title : id,
+              ...(typeof book.genre === "string" ? { genre: book.genre } : {}),
+              ...(typeof book.status === "string" ? { status: book.status } : {}),
+              ...(typeof book.updatedAt === "string" ? { updatedAt: book.updatedAt } : {}),
+            });
           } catch {
-            // not a book directory
+            try {
+              await stat(join(booksDir, id, "book.json"));
+              books.push({ id, title: id });
+            } catch {
+              // not a book directory
+            }
           }
         }
         result.push({ userId: user.id, username: user.username, books });

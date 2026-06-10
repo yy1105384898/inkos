@@ -68,12 +68,14 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
     }
   },
 
-  fetchLiveModels: async (service: string) => {
+  fetchLiveModels: async (service: string, options?: { readonly refresh?: boolean }) => {
     if (get().liveModelsLoading[service]) return;
+    if (!options?.refresh && (get().modelsByService[service]?.length ?? 0) > 0) return;
     set((s) => ({ liveModelsLoading: { ...s.liveModelsLoading, [service]: true } }));
     try {
+      const query = options?.refresh ? "?refresh=1" : "";
       const data = await fetchJson<{ models: ReadonlyArray<ModelInfo> }>(
-        `/services/${encodeURIComponent(service)}/models`,
+        `/services/${encodeURIComponent(service)}/models${query}`,
       );
       set((s) => ({
         modelsByService: { ...s.modelsByService, [service]: data.models ?? [] },
