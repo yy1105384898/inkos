@@ -21,6 +21,14 @@ describe("PLANNER_MEMO_SYSTEM_PROMPT", () => {
   it("is not accidentally empty", () => {
     expect(PLANNER_MEMO_SYSTEM_PROMPT.length).toBeGreaterThan(500);
   });
+
+  it("does not recommend a too-short high-pressure transition placeholder", () => {
+    expect(PLANNER_MEMO_SYSTEM_PROMPT).not.toContain("不适用 - 本章无日常过渡");
+    expect(PLANNER_MEMO_SYSTEM_PROMPT).toContain(
+      "不适用 - 本章为高压/冲突章节，无日常过渡段；所有段落都服务于当章冲突推进。",
+    );
+    expect(PLANNER_MEMO_SYSTEM_PROMPT).toContain("每个二级标题（##）必须出现，内容至少写满一句具体说明");
+  });
 });
 
 describe("PLANNER_MEMO_USER_TEMPLATE", () => {
