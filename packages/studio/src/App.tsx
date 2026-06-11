@@ -23,7 +23,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { AdminPanel } from "./pages/AdminPanel";
 import { BookSidebar, BookSidebarToggle } from "./components/chat/BookSidebar";
 import { MobileBottomNav } from "./components/mobile/MobileBottomNav";
-import { PersonalizationDialogButton } from "./components/PersonalizationDialogButton";
 import { useSSE } from "./hooks/use-sse";
 import { useSessionEvents } from "./hooks/use-session-events";
 import { useTheme } from "./hooks/use-theme";
@@ -201,15 +200,6 @@ export function App() {
 
             <div className="flex items-center gap-2 pl-3 border-l border-border/40">
               <span className="text-xs text-muted-foreground hidden sm:inline">{auth.user.username}</span>
-              <PersonalizationDialogButton
-                iconSize={14}
-                className={(hasMemory) => `inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
-                  hasMemory
-                    ? "bg-primary/10 text-primary hover:bg-primary/15"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                }`}
-                iconClassName={(hasMemory) => hasMemory ? "text-primary" : "text-muted-foreground"}
-              />
               {auth.user.role === "admin" && (
                 <button
                   onClick={() => setRoute({ page: "admin" })}
