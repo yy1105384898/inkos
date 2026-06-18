@@ -11,6 +11,20 @@ const SERVICE_QUICK_LINKS: Record<string, ReadonlyArray<ServiceQuickLink>> = {
     { label: "API 文档", href: "https://yynewapi.yangyangnj.top/docs" },
     { label: "模型/价格", href: "https://yynewapi.yangyangnj.top/models" },
   ],
+  kimicode: [
+    { label: "官网", href: "https://www.kimi.com?aff=inkos" },
+  ],
+  kimiCodingPlan: [
+    { label: "官网", href: "https://www.kimi.com?aff=inkos" },
+  ],
+  kkaiapi: [
+    { label: "官网", href: "https://kkaiapi.com/" },
+    { label: "API 文档", href: "https://kkaiapi.com/docs" },
+    { label: "模型/价格", href: "https://kkaiapi.com/models" },
+  ],
+  moonshot: [
+    { label: "开放平台", href: "https://platform.kimi.com?aff=inkos" },
+  ],
   openrouter: [
     { label: "API Keys", href: "https://openrouter.ai/keys" },
     { label: "模型", href: "https://openrouter.ai/models" },
