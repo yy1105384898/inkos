@@ -52,6 +52,7 @@ import { persistChapterArtifacts } from "./chapter-persistence.js";
 import { runChapterReviewCycle } from "./chapter-review-cycle.js";
 import { validateChapterTruthPersistence } from "./chapter-truth-validation.js";
 import { loadPersistedPlan, relativeToBookDir, savePersistedPlan } from "./persisted-governed-plan.js";
+import { loadPlanningSeedMaterials } from "../utils/planning-materials.js";
 
 const SEQUENCE_LEVEL_CATEGORIES = new Set([
   "Pacing Monotony", "节奏单调",
@@ -79,6 +80,16 @@ const DEFAULT_IMPORT_CHAPTER_EXCERPT_CHARS = 6_000;
 const DEFAULT_IMPORT_TITLE_CATALOG_CHARS = 24_000;
 const DEFAULT_IMPORT_EDGE_CHAPTER_COUNT = 4;
 const DEFAULT_IMPORT_MIDDLE_ANCHOR_COUNT = 8;
+
+function goalForMemo(goal: string): string {
+  const trimmed = goal.trim() || "推进本章核心冲突";
+  return trimmed.length <= 50 ? trimmed : `${trimmed.slice(0, 47).trimEnd()}...`;
+}
+
+function isFastGoldenOpeningChapter(language: string | undefined, chapterNumber: number): boolean {
+  const isZh = (language ?? "zh").toLowerCase().startsWith("zh");
+  return isZh ? chapterNumber <= 3 : chapterNumber <= 5;
+}
 
 function formatImportedChapter(
   chapter: { readonly title: string; readonly content: string },
@@ -1624,6 +1635,7 @@ export class PipelineRunner {
       bookDir,
       chapterNumber,
       externalContext,
+      { fastWhenNoExternalContext: true },
     );
     const reducedControlInput = writeInput.chapterIntent && writeInput.contextPackage && writeInput.ruleStack
       ? {
@@ -2872,6 +2884,9 @@ ${matrix}`,
     bookDir: string,
     chapterNumber: number,
     externalContext?: string,
+    options?: {
+      readonly fastWhenNoExternalContext?: boolean;
+    },
   ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterMemo" | "chapterIntentData" | "contextPackage" | "ruleStack">> {
     if ((this.config.inputGovernanceMode ?? "v2") === "legacy") {
       return { externalContext };
@@ -2882,7 +2897,10 @@ ${matrix}`,
       bookDir,
       chapterNumber,
       externalContext,
-      { reuseExistingIntentWhenContextMissing: true },
+      {
+        reuseExistingIntentWhenContextMissing: true,
+        fastWhenNoExternalContext: options?.fastWhenNoExternalContext,
+      },
     );
 
     return {
@@ -3527,12 +3545,16 @@ ${matrix}`,
     externalContext?: string,
     options?: {
       readonly reuseExistingIntentWhenContextMissing?: boolean;
+      readonly fastWhenNoExternalContext?: boolean;
     },
   ): Promise<{
     plan: PlanChapterOutput;
     composed: ComposeChapterOutput;
   }> {
+    const stageLanguage = await this.resolveBookLanguage(book);
+    this.logStage(stageLanguage, { zh: "规划本章意图", en: "planning chapter intent" });
     const plan = await this.resolveGovernedPlan(book, bookDir, chapterNumber, externalContext, options);
+    this.logStage(stageLanguage, { zh: "组装章节运行时上下文", en: "composing chapter runtime context" });
     const composerCtx = this.agentCtxFor("composer", book.id);
     const composer = new ComposerAgent(composerCtx);
     const composed = await composeGovernedChapter({
@@ -3555,6 +3577,7 @@ ${matrix}`,
     externalContext?: string,
     options?: {
       readonly reuseExistingIntentWhenContextMissing?: boolean;
+      readonly fastWhenNoExternalContext?: boolean;
     },
   ): Promise<PlanChapterOutput> {
     if (
@@ -3563,6 +3586,11 @@ ${matrix}`,
     ) {
       const persisted = await loadPersistedPlan(bookDir, chapterNumber);
       if (persisted) return persisted;
+      if (options.fastWhenNoExternalContext) {
+        const plan = await this.buildFastGovernedPlan(book, bookDir, chapterNumber);
+        await savePersistedPlan(bookDir, plan);
+        return plan;
+      }
     }
 
     const planner = new PlannerAgent(this.agentCtxFor("planner", book.id));
@@ -3576,6 +3604,255 @@ ${matrix}`,
     // skip the planner LLM call when no new context is supplied.
     await savePersistedPlan(bookDir, plan);
     return plan;
+  }
+
+  private async buildFastGovernedPlan(
+    book: BookConfig,
+    bookDir: string,
+    chapterNumber: number,
+  ): Promise<PlanChapterOutput> {
+    const language = book.language ?? "zh";
+    const seed = await loadPlanningSeedMaterials({ bookDir, chapterNumber });
+    const outlineNode = this.pickFastOutlineNode(seed.volumeOutline, chapterNumber);
+    const goal = this.pickFastGoal({
+      language,
+      chapterNumber,
+      currentFocus: seed.currentFocus,
+      outlineNode,
+      authorIntent: seed.authorIntent,
+    });
+    const isGoldenOpening = isFastGoldenOpeningChapter(language, chapterNumber);
+    const memo = this.buildFastChapterMemo({
+      language,
+      chapterNumber,
+      goal,
+      isGoldenOpening,
+      outlineNode,
+      currentFocus: seed.currentFocus,
+      previousEndingExcerpt: seed.previousEndingExcerpt,
+    });
+    const intent = {
+      chapter: chapterNumber,
+      goal,
+      ...(outlineNode ? { outlineNode } : {}),
+      ...(outlineNode ? {
+        arcContext: language === "en" ? `Outline node: ${outlineNode}` : `卷纲节点：${outlineNode}`,
+      } : {}),
+      mustKeep: this.pickFastListItems(seed.currentState, seed.storyBible, language, 4),
+      mustAvoid: this.pickFastListItems(seed.currentFocus, seed.bookRulesRaw, language, 4),
+      styleEmphasis: this.pickFastListItems(seed.authorIntent, seed.currentFocus, language, 4),
+    };
+    const runtimePath = join(
+      bookDir,
+      "story",
+      "runtime",
+      `chapter-${String(chapterNumber).padStart(4, "0")}.intent.md`,
+    );
+    await mkdir(join(bookDir, "story", "runtime"), { recursive: true });
+    const intentMarkdown = this.renderFastIntentMarkdown(intent, memo, language);
+    await writeFile(runtimePath, intentMarkdown, "utf-8");
+    return {
+      intent,
+      memo,
+      intentMarkdown,
+      plannerInputs: [
+        "story/current_focus.md",
+        "story/current_state.md",
+        "outline/volume_map.md",
+        "story/chapter_summaries.md",
+      ],
+      runtimePath,
+    };
+  }
+
+  private buildFastChapterMemo(params: {
+    readonly language: string | undefined;
+    readonly chapterNumber: number;
+    readonly goal: string;
+    readonly isGoldenOpening: boolean;
+    readonly outlineNode?: string;
+    readonly currentFocus: string;
+    readonly previousEndingExcerpt?: string;
+  }): ChapterMemo {
+    const isEn = params.language === "en";
+    const body = isEn
+      ? [
+          "## Current task",
+          `Continue chapter ${params.chapterNumber} around: ${params.goal}.`,
+          "",
+          "## What the reader is waiting for right now",
+          params.previousEndingExcerpt
+            ? `Pay off the pressure created by the previous ending: ${params.previousEndingExcerpt.slice(-180)}`
+            : "Establish the immediate pressure quickly and make the reader want the next beat.",
+          "",
+          "## To pay off / to keep buried",
+          "Pay off near-term promises supported by the current state; keep large secrets buried unless the outline demands a reveal.",
+          "",
+          "## What the slow / transitional beats carry",
+          "Any slower beat must carry pressure, evidence, relationship movement, or a setup for the next action.",
+          "",
+          "## Three-question check on the key choice",
+          "The protagonist's key choice needs a clear reason, visible self-interest, and established character logic.",
+          "",
+          "## Required end-of-chapter change",
+          "End with a concrete change in information, pressure, relationship, objective, or risk.",
+          "",
+          "## Hook ledger for this chapter",
+          "advance: keep the active promise moving; resolve: only settle evidence-backed hooks; defer: preserve larger threads.",
+          "",
+          "## Do not",
+          "Do not contradict established facts, drift from the active focus, or replace the outline with a generic transition.",
+        ].join("\n")
+      : [
+          "## 当前任务",
+          `围绕“${params.goal}”推进第 ${params.chapterNumber} 章，承接上一章压力，不另起炉灶。`,
+          "",
+          "## 读者此刻在等什么",
+          params.previousEndingExcerpt
+            ? `回应上一章结尾形成的期待：${params.previousEndingExcerpt.slice(-180)}`
+            : "尽快建立当前压力，让读者看到主角下一步必须行动的理由。",
+          "",
+          "## 该兑现的 / 暂不掀的",
+          "优先兑现当前状态和近期伏笔支撑的近端承诺；大秘密、幕后主使和终局信息继续压住。",
+          "",
+          "## 日常/过渡承担什么任务",
+          "过渡段必须承载压力、证据、人物关系、目标变化或下一步行动铺垫，不能只是闲聊。",
+          "",
+          "## 关键抉择过三连问",
+          "主角关键选择必须有原因、符合当前利益，并且贴合既有人设和行为逻辑。",
+          "",
+          "## 章尾必须发生的改变",
+          "章尾至少在信息、压力、关系、目标或风险上发生一个明确变化，形成下一章钩子。",
+          "",
+          "## 本章 hook 账",
+          "advance: 推进当前活跃承诺；resolve: 只结清已有证据支撑的线索；defer: 大线继续保留。",
+          "",
+          "## 不要做",
+          "不要违背既成事实，不要偏离当前焦点，不要把章节写成泛泛过渡或设定说明。",
+        ].join("\n");
+    return {
+      chapter: params.chapterNumber,
+      goal: goalForMemo(params.goal),
+      isGoldenOpening: params.isGoldenOpening,
+      body,
+      threadRefs: [],
+    };
+  }
+
+  private renderFastIntentMarkdown(
+    intent: PlanChapterOutput["intent"],
+    memo: ChapterMemo,
+    language: string | undefined,
+  ): string {
+    if (language === "en") {
+      return [
+        "# Chapter Intent",
+        "",
+        "## Goal",
+        intent.goal,
+        "",
+        "## Outline Node",
+        intent.outlineNode ?? "(none)",
+        "",
+        "## Must Keep",
+        this.renderFastList(intent.mustKeep),
+        "",
+        "## Must Avoid",
+        this.renderFastList(intent.mustAvoid),
+        "",
+        "## Style Emphasis",
+        this.renderFastList(intent.styleEmphasis),
+        "",
+        "## Memo",
+        memo.body,
+        "",
+      ].join("\n");
+    }
+    return [
+      "# 章节意图",
+      "",
+      "## 目标",
+      intent.goal,
+      "",
+      "## 大纲节点",
+      intent.outlineNode ?? "无",
+      "",
+      "## 必须保留",
+      this.renderFastList(intent.mustKeep),
+      "",
+      "## 必须避免",
+      this.renderFastList(intent.mustAvoid),
+      "",
+      "## 风格重点",
+      this.renderFastList(intent.styleEmphasis),
+      "",
+      "## Memo",
+      memo.body,
+      "",
+    ].join("\n");
+  }
+
+  private renderFastList(items: ReadonlyArray<string>): string {
+    return items.length > 0 ? items.map((item) => `- ${item}`).join("\n") : "- none";
+  }
+
+  private pickFastGoal(params: {
+    readonly language: string | undefined;
+    readonly chapterNumber: number;
+    readonly currentFocus: string;
+    readonly outlineNode?: string;
+    readonly authorIntent: string;
+  }): string {
+    const candidates = [
+      this.firstMeaningfulFastLine(params.currentFocus),
+      this.firstMeaningfulFastLine(params.outlineNode),
+      this.firstMeaningfulFastLine(params.authorIntent),
+    ];
+    const first = candidates.find((candidate): candidate is string => Boolean(candidate));
+    if (first) return first.slice(0, 120);
+    return params.language === "en"
+      ? `Advance chapter ${params.chapterNumber} with clear conflict and a strong ending hook.`
+      : `推进第 ${params.chapterNumber} 章的核心冲突，并留下清晰章尾钩子。`;
+  }
+
+  private pickFastOutlineNode(volumeOutline: string, chapterNumber: number): string | undefined {
+    const lines = volumeOutline.split(/\r?\n/);
+    const chapterPattern = new RegExp(`(?:第\\s*${chapterNumber}\\s*章|chapter\\s*${chapterNumber}\\b)`, "i");
+    for (let i = 0; i < lines.length; i += 1) {
+      if (!chapterPattern.test(lines[i] ?? "")) continue;
+      const block = lines.slice(i, i + 6).map((line) => line.trim()).filter(Boolean).join(" ");
+      return block.slice(0, 240);
+    }
+    return this.firstMeaningfulFastLine(volumeOutline);
+  }
+
+  private pickFastListItems(
+    first: string,
+    second: string,
+    language: string | undefined,
+    limit: number,
+  ): string[] {
+    const placeholder = language === "en" ? "(file not created)" : "(文件尚未创建)";
+    return [first, second]
+      .flatMap((text) => text.split(/\r?\n/))
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("-") || line.startsWith("*"))
+      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .filter((line) => line.length > 0 && line !== placeholder)
+      .slice(0, limit);
+  }
+
+  private firstMeaningfulFastLine(content?: string): string | undefined {
+    return content
+      ?.split(/\r?\n/)
+      .map((line) => line.trim().replace(/^[-*]\s*/, ""))
+      .find((line) =>
+        line.length > 0
+        && !line.startsWith("#")
+        && line !== "(文件尚未创建)"
+        && line !== "(not found)"
+        && !/^\(?none\)?$/i.test(line)
+      );
   }
 
   private async emitWebhook(

@@ -94,6 +94,31 @@ export function appendBoundedToolLogs(
   return [...(existing ?? []), ...incoming].slice(-MAX_TOOL_LOGS);
 }
 
+export function extractPipelineStageName(message: string): string | undefined {
+  const trimmed = message.trim();
+  if (trimmed.startsWith("阶段：")) return trimmed.slice("阶段：".length).trim();
+  if (trimmed.startsWith("Stage: ")) return trimmed.slice("Stage: ".length).trim();
+  return undefined;
+}
+
+export function applyPipelineStageUpdate(
+  stages: ReadonlyArray<PipelineStage> | undefined,
+  stageName: string,
+): PipelineStage[] | undefined {
+  if (!stages || stages.length === 0) return stages ? [...stages] : undefined;
+  let found = false;
+  return stages.map((stage) => {
+    if (stage.label === stageName) {
+      found = true;
+      return { ...stage, status: "active" as const };
+    }
+    if (!found && stage.status === "active") {
+      return { ...stage, status: "completed" as const, progress: undefined };
+    }
+    return stage;
+  });
+}
+
 export function createStreamTextDeltaBatcher(
   flushDeltas: (deltas: StreamTextDelta[]) => void,
   delayMs = STREAM_TEXT_FLUSH_MS,
@@ -407,11 +432,16 @@ export function attachSessionStreamListeners({
           const [messages, stream] = getOrCreateStream(runtime.messages, streamTs);
           const runningTool = findRunningToolPart([...(stream.parts ?? [])]);
           if (!runningTool) return {};
+          const stageName = extractPipelineStageName(message);
           const parts = (stream.parts ?? []).map((part) => {
             if (part.type !== "tool" || part.execution.id !== runningTool.execution.id) return part;
             return {
               type: "tool" as const,
-              execution: { ...part.execution, logs: appendBoundedToolLogs(part.execution.logs, [message]) },
+              execution: {
+                ...part.execution,
+                logs: appendBoundedToolLogs(part.execution.logs, [message]),
+                ...(stageName ? { stages: applyPipelineStageUpdate(part.execution.stages, stageName) } : {}),
+              },
             };
           });
           const flat = deriveFlat(parts);

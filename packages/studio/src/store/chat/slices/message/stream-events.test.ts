@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_TOOL_LOGS,
+  applyPipelineStageUpdate,
   applyStreamTextDeltas,
   appendBoundedToolLogs,
   createLatestEventThrottle,
   createStreamTextDeltaBatcher,
+  extractPipelineStageName,
 } from "./stream-events";
 
 describe("stream event performance helpers", () => {
@@ -87,5 +89,20 @@ describe("stream event performance helpers", () => {
     expect(logs).toHaveLength(MAX_TOOL_LOGS);
     expect(logs[0]).toBe("old-21");
     expect(logs.at(-1)).toBe("latest");
+  });
+
+  it("extracts pipeline stage logs and advances the active stage", () => {
+    expect(extractPipelineStageName("阶段：撰写章节草稿")).toBe("撰写章节草稿");
+    expect(extractPipelineStageName("Stage: writing chapter draft")).toBe("writing chapter draft");
+
+    const stages = applyPipelineStageUpdate([
+      { label: "准备章节输入", status: "active" },
+      { label: "撰写章节草稿", status: "pending" },
+    ], "撰写章节草稿");
+
+    expect(stages).toEqual([
+      { label: "准备章节输入", status: "completed", progress: undefined },
+      { label: "撰写章节草稿", status: "active" },
+    ]);
   });
 });

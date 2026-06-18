@@ -57,7 +57,8 @@ import { buildStudioBookConfig } from "./book-create.js";
 
 const PIPELINE_STAGES: Record<string, string[]> = {
   writer: [
-    "准备章节输入", "撰写章节草稿", "落盘最终章节",
+    "准备章节输入", "规划本章意图", "组装章节运行时上下文",
+    "撰写章节草稿", "落盘最终章节",
     "生成最终真相文件", "校验真相文件变更", "同步记忆索引",
     "更新章节索引与快照",
   ],
