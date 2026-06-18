@@ -330,7 +330,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     const trimmed = text.trim();
     const session = get().sessions[sessionId];
     if (!trimmed || !session || session.isStreaming) return;
-    const activeBookId = options?.activeBookId;
+    const activeBookId = options?.activeBookId ?? session.bookId ?? undefined;
     const sessionKind: ChatSessionKind = options?.sessionKind
       ?? session.sessionKind
       ?? (activeBookId ? "book" : "chat");
@@ -351,16 +351,21 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         await fetchJson<SessionResponse>("/sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, bookId: session.bookId, sessionKind, playMode }),
+          body: JSON.stringify({ sessionId, bookId: activeBookId ?? null, sessionKind, playMode }),
         });
         // 落盘成功：把 isDraft 翻成 false，同时把 sessionId 追加进 sessionIdsByBook
         // 让侧边栏现在才看到这条会话。
         set((state) => ({
-          sessions: updateSession(state.sessions, sessionId, () => ({ isDraft: false, sessionKind, playMode })),
+          sessions: updateSession(state.sessions, sessionId, () => ({
+            bookId: activeBookId ?? null,
+            isDraft: false,
+            sessionKind,
+            playMode,
+          })),
           sessionIdsByBook: {
             ...state.sessionIdsByBook,
-            [bookKey(session.bookId)]: mergeSessionIds(
-              state.sessionIdsByBook[bookKey(session.bookId)],
+            [bookKey(activeBookId ?? null)]: mergeSessionIds(
+              state.sessionIdsByBook[bookKey(activeBookId ?? null)],
               [sessionId],
             ),
           },

@@ -160,6 +160,30 @@ describe("chat message actions", () => {
     expect(store.getState().sessionIdsByBook["new-book"]).toContain(sessionId);
   });
 
+  it("binds a draft session to the active book before sending a book action", async () => {
+    const store = createTestStore();
+    const sessionId = store.getState().createDraftSession(null, "book");
+    store.getState().setSelectedModel("gpt-5.2", "yynewapi", { persist: false });
+    fetchJson
+      .mockResolvedValueOnce({ session: { sessionId, bookId: "demo-book", sessionKind: "book" } })
+      .mockResolvedValueOnce({ response: "Audit queued.", session: { sessionId, bookId: "demo-book", sessionKind: "book" } });
+
+    await store.getState().sendMessage(sessionId, "审计", { activeBookId: "demo-book", sessionKind: "book" });
+
+    expect(fetchJson).toHaveBeenNthCalledWith(1, "/sessions", expect.objectContaining({
+      body: JSON.stringify({ sessionId, bookId: "demo-book", sessionKind: "book", playMode: undefined }),
+    }));
+    expect(fetchJson).toHaveBeenNthCalledWith(2, "/agent", expect.objectContaining({
+      body: expect.stringContaining('"activeBookId":"demo-book"'),
+    }));
+    expect(store.getState().sessions[sessionId]).toMatchObject({
+      bookId: "demo-book",
+      sessionKind: "book",
+      isDraft: false,
+    });
+    expect(store.getState().sessionIdsByBook["demo-book"]).toContain(sessionId);
+  });
+
   it("keeps a tool-only stream when /agent returns an empty response after a proposal", async () => {
     const store = createTestStore();
     const sessionId = store.getState().createDraftSession(null, "book-create");
