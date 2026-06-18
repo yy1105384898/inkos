@@ -554,6 +554,7 @@ interface ServiceConfigEntry {
   temperature?: number;
   apiFormat?: "chat" | "responses";
   stream?: boolean;
+  models?: Array<{ id: string; name: string }>;
 }
 
 type LLMConfigSource = "env" | "studio";
@@ -790,14 +791,27 @@ function normalizeServiceConfig(raw: unknown): ServiceConfigEntry[] {
   if (Array.isArray(raw)) {
     return raw
       .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-      .map((entry) => ({
-        service: typeof entry.service === "string" && entry.service.length > 0 ? entry.service : "custom",
-        ...(typeof entry.name === "string" && entry.name.length > 0 ? { name: entry.name } : {}),
-        ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
-        ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
-        ...(entry.apiFormat === "chat" || entry.apiFormat === "responses" ? { apiFormat: entry.apiFormat } : {}),
-        ...(typeof entry.stream === "boolean" ? { stream: entry.stream } : {}),
-      }));
+      .map((entry) => {
+        const models = Array.isArray(entry.models)
+          ? entry.models
+              .filter((model): model is Record<string, unknown> => Boolean(model) && typeof model === "object")
+              .map((model) => {
+                const id = typeof model.id === "string" ? model.id.trim() : "";
+                const name = typeof model.name === "string" && model.name.trim() ? model.name.trim() : id;
+                return id && isTextChatModelId(id) ? { id, name } : null;
+              })
+              .filter((model): model is { id: string; name: string } => Boolean(model))
+          : [];
+        return {
+          service: typeof entry.service === "string" && entry.service.length > 0 ? entry.service : "custom",
+          ...(typeof entry.name === "string" && entry.name.length > 0 ? { name: entry.name } : {}),
+          ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
+          ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
+          ...(entry.apiFormat === "chat" || entry.apiFormat === "responses" ? { apiFormat: entry.apiFormat } : {}),
+          ...(typeof entry.stream === "boolean" ? { stream: entry.stream } : {}),
+          ...(models.length > 0 ? { models } : {}),
+        };
+      });
   }
 
   if (raw && typeof raw === "object") {
@@ -1477,11 +1491,38 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       readonly currentConfig?: ProjectConfig;
       readonly sessionIdForSSE?: string;
       readonly llmOverride?: StudioBrowserLlmOverride;
+      readonly service?: string;
+      readonly selectedModel?: string;
     },
   ): Promise<PipelineConfig> {
     const currentConfig = overrides?.currentConfig ?? await loadCurrentProjectConfig();
     const personalizationContext = buildPersonalizationExternalContext(await loadPersonalizationMemory(root));
-    const effectiveLlmConfig = buildBrowserLlmConfig(currentConfig, overrides?.llmOverride);
+    const requestedService = overrides?.service?.trim();
+    const requestedModel = overrides?.selectedModel?.trim();
+    if (requestedModel && !isTextChatModelId(requestedModel)) {
+      throw new ApiError(400, "INVALID_TEXT_MODEL", "请选择文本模型。");
+    }
+    let effectiveLlmConfig = buildBrowserLlmConfig(currentConfig, overrides?.llmOverride);
+    if (!overrides?.llmOverride && requestedService && requestedModel) {
+      const configuredEntry = await resolveConfiguredServiceEntry(root, requestedService);
+      const resolved = await resolveServiceModel(
+        requestedService,
+        requestedModel,
+        root,
+        await resolveConfiguredServiceBaseUrl(root, requestedService),
+        configuredEntry?.apiFormat,
+      );
+      effectiveLlmConfig = {
+        ...effectiveLlmConfig,
+        provider: resolved.model.provider === "anthropic" ? "anthropic" : "openai",
+        service: requestedService,
+        model: requestedModel,
+        apiKey: resolved.apiKey,
+        ...(resolved.model.baseUrl ? { baseUrl: resolved.model.baseUrl } : {}),
+        ...(configuredEntry?.apiFormat ? { apiFormat: configuredEntry.apiFormat } : {}),
+        ...(configuredEntry?.stream !== undefined ? { stream: configuredEntry.stream } : {}),
+      };
+    }
     const scopedSseSink: LogSink = overrides?.sessionIdForSSE
       ? {
           write(entry) {
@@ -2266,21 +2307,32 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.get("/api/v1/services/models", async (c) => {
     const secrets = await loadSecrets(root);
+    let savedServices: ServiceConfigEntry[] = [];
+    try {
+      const config = await loadRawConfig(root);
+      savedServices = normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services);
+    } catch {
+      // no config file
+    }
     const endpoints = getAllEndpoints()
       .filter((ep) => ep.id !== "custom" && Boolean(secrets.services[ep.id]?.apiKey));
 
     const groups = endpoints.map((ep) => ({
       service: ep.id,
       label: ep.label,
-      models: ep.models
-        .filter((m) => m.enabled !== false)
-        .filter((m) => isTextChatModelId(m.id))
-        .map((m) => ({
-          id: m.id,
-          name: m.id,
-          ...(typeof m.maxOutput === "number" ? { maxOutput: m.maxOutput } : {}),
-          ...(m.contextWindowTokens > 0 ? { contextWindow: m.contextWindowTokens } : {}),
-        })),
+      models: (() => {
+        const savedModels = savedServices.find((svc) => svc.service === ep.id)?.models;
+        if (savedModels && savedModels.length > 0) return savedModels;
+        return ep.models
+          .filter((m) => m.enabled !== false)
+          .filter((m) => isTextChatModelId(m.id))
+          .map((m) => ({
+            id: m.id,
+            name: m.id,
+            ...(typeof m.maxOutput === "number" ? { maxOutput: m.maxOutput } : {}),
+            ...(m.contextWindowTokens > 0 ? { contextWindow: m.contextWindowTokens } : {}),
+          }));
+      })(),
     }));
 
     return c.json({ groups });
@@ -2301,15 +2353,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         id: `custom:${s.name ?? "Custom"}`,
         baseUrl: s.baseUrl ?? "",
         label: s.name ?? "Custom",
+        models: s.models ?? [],
       }))
       .filter((s) => s.baseUrl && Boolean(secrets.services[s.id]?.apiKey));
 
     const groups = await Promise.all(customs.map(async (s) => ({
       service: s.id,
       label: s.label,
-      models: filterTextChatModels(
-        await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
-      ),
+      models: s.models.length > 0
+        ? s.models
+        : filterTextChatModels(
+          await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
+        ),
     })));
 
     return c.json({ groups });
@@ -3930,16 +3985,26 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   // --- Radar Scan ---
 
   app.post("/api/v1/radar/scan", async (c) => {
-    const body = await readJsonBody<{ llmOverride?: unknown }>(c);
+    const body = await readJsonBody<{ llmOverride?: unknown; service?: string; model?: string }>(c);
     const llmOverride = normalizeBrowserLlmOverride(body.llmOverride);
+    const service = typeof body.service === "string" ? body.service.trim() : "";
+    const selectedModel = typeof body.model === "string" ? body.model.trim() : "";
     broadcast("radar:start", {});
     try {
-      const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
+      const pipeline = new PipelineRunner(await buildPipelineConfig({
+        llmOverride,
+        ...(service ? { service } : {}),
+        ...(selectedModel ? { selectedModel } : {}),
+      }));
       const result = await pipeline.runRadar();
       await saveRadarScan(root, result);
       broadcast("radar:complete", { result });
       return c.json(result);
     } catch (e) {
+      if (e instanceof ApiError) {
+        broadcast("radar:error", { error: e.message });
+        return c.json({ error: e.message }, e.status === 400 ? 400 : 500);
+      }
       broadcast("radar:error", { error: String(e) });
       return c.json({ error: String(e) }, 500);
     }

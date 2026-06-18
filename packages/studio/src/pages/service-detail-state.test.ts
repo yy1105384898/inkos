@@ -119,7 +119,13 @@ describe("saveServiceConfig", () => {
         service: "openai",
         defaultModel: "gpt-5.5",
         services: [
-          { service: "openai", temperature: 0.7, apiFormat: "chat", stream: true },
+          {
+            service: "openai",
+            temperature: 0.7,
+            apiFormat: "chat",
+            stream: true,
+            models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+          },
         ],
       },
     ]);
@@ -174,7 +180,13 @@ describe("saveServiceConfig", () => {
         service: "openai",
         defaultModel: "gpt-5.5",
         services: [
-          { service: "openai", temperature: 0.7, apiFormat: "chat", stream: true },
+          {
+            service: "openai",
+            temperature: 0.7,
+            apiFormat: "chat",
+            stream: true,
+            models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+          },
         ],
       },
     ]);
@@ -271,6 +283,7 @@ describe("saveServiceConfig", () => {
             temperature: 0.7,
             apiFormat: "chat",
             stream: false,
+            models: [{ id: "qwen3.6:35b-a3b", name: "qwen3.6:35b-a3b" }],
             name: "Local",
             baseUrl: "http://127.0.0.1:8001/v1",
           },

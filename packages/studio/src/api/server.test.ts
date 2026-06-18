@@ -964,6 +964,41 @@ describe("createStudioServer daemon lifecycle", () => {
     ]);
   });
 
+  it("prefers user-saved detected models over the built-in bank list", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          {
+            service: "yynewapi",
+            apiFormat: "responses",
+            stream: true,
+            models: [
+              { id: "gpt-5.3-codex-spark", name: "gpt-5.3-codex-spark" },
+              { id: "gpt-5.4-mini", name: "gpt-5.4-mini" },
+            ],
+          },
+        ],
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        yynewapi: { apiKey: "sk-yy" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models");
+    expect(response.status).toBe(200);
+    const body = await response.json() as { groups: Array<{ service: string; models: Array<{ id: string }> }> };
+    expect(body.groups.find((g) => g.service === "yynewapi")?.models).toEqual([
+      { id: "gpt-5.3-codex-spark", name: "gpt-5.3-codex-spark" },
+      { id: "gpt-5.4-mini", name: "gpt-5.4-mini" },
+    ]);
+  });
+
   it("filters non-text models out of connected bank model groups", async () => {
     loadSecretsMock.mockResolvedValue({
       services: {

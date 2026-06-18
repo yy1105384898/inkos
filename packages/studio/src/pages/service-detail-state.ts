@@ -207,6 +207,10 @@ export async function saveServiceConfig(args: {
           temperature: parseFloat(args.temperature),
           apiFormat: savedApiFormat,
           stream: savedStream,
+          models: (probe.models ?? []).map((model) => ({
+            id: model.id,
+            name: model.name ?? model.id,
+          })),
           ...(args.isCustom ? {
             name: args.resolvedCustomName,
             baseUrl: savedBaseUrl,
