@@ -2818,6 +2818,38 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(agentConfig.bookId).toBe("demo-book");
   });
 
+  it("binds an orphan session to activeBookId before running book tools", async () => {
+    const orphanSession = {
+      sessionId: "agent-session-1",
+      bookId: null,
+      title: null,
+      messages: [],
+      events: [],
+      draftRounds: [],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    loadBookSessionMock.mockResolvedValue(orphanSession);
+    migrateBookSessionMock.mockResolvedValue({
+      ...orphanSession,
+      bookId: "demo-book",
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "审计", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(migrateBookSessionMock).toHaveBeenCalledWith(root, "agent-session-1", "demo-book");
+    const agentConfig = runAgentSessionMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(agentConfig.bookId).toBe("demo-book");
+  });
+
   it("rejects an activeBookId that conflicts with the persisted session book", async () => {
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(cloneProjectConfig() as never, root);

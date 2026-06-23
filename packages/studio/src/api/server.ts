@@ -2754,6 +2754,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         } catch {
           throw new ApiError(404, "BOOK_NOT_FOUND", `Book not found: ${agentBookId}`);
         }
+        if (requestedActiveBookId && !persistedBookId) {
+          const migratedSession = await migrateBookSession(root, bookSession.sessionId, requestedActiveBookId);
+          if (migratedSession) {
+            bookSession = migratedSession;
+          }
+        }
       }
       const streamSessionId = loadedBookSession.sessionId;
       const titleBeforeRun = bookSession.title;
