@@ -151,11 +151,7 @@ export function ServiceConfigSourceCard({ onChange }: { onChange?: () => void })
             当前虽然检测到 .env，但 Studio 和 Agent 请求不会直接使用这套覆盖；点击“导入检测到的配置”后，会把它保存为 Studio 服务配置。
           </div>
         </div>
-      ) : (
-        <div className="rounded-lg border border-border/30 bg-secondary/20 p-3 text-xs text-muted-foreground/75">
-          未检测到目录或全局 `.env` 里的 LLM 覆盖变量。当前会直接使用项目配置和 Studio 服务配置。
-        </div>
-      )}
+      ) : null}
 
       {error ? (
         <div className="text-xs text-rose-500">{error}</div>
