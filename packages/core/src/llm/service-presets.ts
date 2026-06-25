@@ -46,6 +46,7 @@ export const SERVICE_PRESETS: Record<string, ServicePreset> = {
   ppio:        { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://api.ppinfra.com/v3/openai",                  label: "PPIO" },
   openrouter:  { providerFamily: "openai",    api: "openai-responses",   baseUrl: "https://openrouter.ai/api/v1",                       label: "OpenRouter",      piProvider: "openrouter" },
   yynewapi:     { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://yynewapi.yangyangnj.top/v1",                         label: "yynewapi",         modelsBaseUrl: "https://yynewapi.yangyangnj.top/v1" },
+  yysubapi:     { providerFamily: "openai",    api: "openai-completions", baseUrl: "https://yysubapi.yangyangnj.top/v1",                         label: "yysubapi",         modelsBaseUrl: "https://yysubapi.yangyangnj.top/v1" },
   ollama:      { providerFamily: "openai",    api: "openai-completions", baseUrl: "http://localhost:11434/v1",                          label: "Ollama (本地)" },
   custom:      { providerFamily: "openai",    api: "openai-completions", baseUrl: "",                                                    label: "自定义端点" },
 };

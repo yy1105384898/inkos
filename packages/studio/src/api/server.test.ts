@@ -57,7 +57,8 @@ const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
   minimax: { providerFamily: "openai", baseUrl: "https://api.minimaxi.com/v1", modelsBaseUrl: "https://api.minimaxi.com/v1", knownModels: [] as string[] },
   bailian: { providerFamily: "anthropic", baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic", modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", knownModels: [] as string[] },
   google: { providerFamily: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", modelsBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", knownModels: [] as string[] },
-  kkaiapi: { providerFamily: "openai", baseUrl: "https://api.kkaiapi.com/v1", modelsBaseUrl: "https://api.kkaiapi.com/v1", knownModels: [] as string[] },
+  yynewapi: { providerFamily: "openai", baseUrl: "https://yynewapi.yangyangnj.top/v1", modelsBaseUrl: "https://yynewapi.yangyangnj.top/v1", knownModels: [] as string[] },
+  yysubapi: { providerFamily: "openai", baseUrl: "https://yysubapi.yangyangnj.top/v1", modelsBaseUrl: "https://yysubapi.yangyangnj.top/v1", knownModels: [] as string[] },
   ollama: { providerFamily: "openai", baseUrl: "http://localhost:11434/v1", modelsBaseUrl: "http://localhost:11434/v1", knownModels: [] as string[] },
   custom: { providerFamily: "openai", baseUrl: "", knownModels: [] as string[] },
 };
@@ -96,7 +97,7 @@ const endpointIdsByGroup = {
     "minimax", "moonshot", "sensenova", "spark", "stepfun", "tencentcloud",
     "volcengine", "wenxin", "xiaomimimo", "zeroone", "zhipu",
   ],
-  aggregator: ["kkaiapi", "openrouter", "newapi", "siliconcloud"],
+  aggregator: ["yynewapi", "yysubapi", "openrouter", "siliconcloud"],
   local: ["githubCopilot", "ollama"],
   codingPlan: [
     "astronCodingPlan", "bailianCodingPlan", "glmCodingPlan", "kimiCodingPlan", "kimicode",
@@ -980,7 +981,7 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(bank.filter((s) => s.group === "aggregator")).toHaveLength(4);
     expect(bank.filter((s) => s.group === "local")).toHaveLength(2);
     expect(bank.filter((s) => s.group === "codingPlan")).toHaveLength(8);
-    expect(bank.filter((s) => s.group === "aggregator").map((s) => s.service)[0]).toBe("kkaiapi");
+    expect(bank.filter((s) => s.group === "aggregator").map((s) => s.service)[0]).toBe("yynewapi");
     expect(body.services.find((s) => s.service === "moonshot")?.connected).toBe(true);
     expect(body.services.find((s) => s.service === "custom:内网GPT")).toMatchObject({
       connected: true,

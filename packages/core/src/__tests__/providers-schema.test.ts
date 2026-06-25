@@ -3,7 +3,7 @@ import { getAllEndpoints, getEndpoint } from "../llm/providers/index.js";
 
 describe("providers structural integrity", () => {
   it("每个 provider 必填字段都存在", () => {
-    const gatewayProviders = new Set(["custom", "newapi"]);
+    const gatewayProviders = new Set(["custom"]);
     for (const p of getAllEndpoints()) {
       expect(p.id).toBeTruthy();
       expect(p.label).toBeTruthy();
@@ -110,14 +110,13 @@ describe("providers structural integrity", () => {
 
   it("B4：海外/本地/自定义/聚合/GH 全部收录（8 个）", () => {
     const ids = getAllEndpoints().map((p) => p.id);
-    for (const id of ["ollama", "openrouter", "custom", "mistral", "xai", "newapi", "githubCopilot", "yynewapi"]) {
+    for (const id of ["ollama", "openrouter", "custom", "mistral", "xai", "githubCopilot", "yynewapi", "yysubapi"]) {
       expect(ids).toContain(id);
     }
   });
 
-  it("B4：custom / newapi baseUrl 为空（gateway 占位）", () => {
+  it("B4：custom baseUrl 为空（gateway 占位）", () => {
     expect(getEndpoint("custom")?.baseUrl).toBe("");
-    expect(getEndpoint("newapi")?.baseUrl).toBe("");
   });
 
   it("B4：总 provider 数 = 30（不含 CodingPlan 分组，R5 删 qwen / higress 且精简聚合入口后）", () => {

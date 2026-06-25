@@ -59,6 +59,21 @@ describe("service-presets regression", () => {
       expect(guessServiceFromBaseUrl("https://yynewapi.yangyangnj.top/v1")).toBe("yynewapi");
     });
 
+    it("exposes yysubapi as an OpenAI-compatible aggregator with text models", async () => {
+      const preset = resolveServicePreset("yysubapi");
+      expect(preset).toMatchObject({
+        providerFamily: "openai",
+        api: "openai-completions",
+        baseUrl: "https://yysubapi.yangyangnj.top/v1",
+      });
+      const models = await listModelsForService("yysubapi");
+      expect(models.map((m) => m.id)).toEqual(expect.arrayContaining([
+        "gpt-5.4",
+        "deepseek-v4-flash",
+      ]));
+      expect(guessServiceFromBaseUrl("https://yysubapi.yangyangnj.top/v1")).toBe("yysubapi");
+    });
+
     it("returns provider bank models for minimax (B8 升级：provider.models 替代 preset.knownModels)", async () => {
       const models = await listModelsForService("minimax");
       expect(models.length).toBeGreaterThanOrEqual(7);

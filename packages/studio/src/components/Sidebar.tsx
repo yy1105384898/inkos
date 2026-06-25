@@ -559,7 +559,17 @@ export function Sidebar({ nav, activePage, sse, t }: {
               active={activePage === "logs"}
               onClick={nav.toLogs}
             />
-            <PersonalizationDialogButton />
+            <PersonalizationDialogButton
+              iconSize={16}
+              className={(hasMemory) => `w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${
+                hasMemory
+                  ? "text-foreground font-medium hover:text-foreground hover:bg-secondary/50"
+                  : "text-foreground font-medium hover:text-foreground hover:bg-secondary/50"
+              }`}
+              iconClassName={(hasMemory) => `transition-colors ${
+                hasMemory ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
+              }`}
+            />
           </div>
         </div>
 
