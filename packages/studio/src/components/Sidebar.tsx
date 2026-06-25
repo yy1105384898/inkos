@@ -26,19 +26,42 @@ import {
   Terminal,
   Plus,
   MessageSquare,
+  Gamepad2,
   ScrollText,
+  BookPlus,
+  BookCopy,
   Boxes,
+  Feather,
   Wand2,
   FileInput,
   TrendingUp,
   Stethoscope,
+  Zap,
   FolderOpen,
   ChevronRight,
   Loader2,
   MoreHorizontal,
   Pencil,
   Trash2,
+  GitBranch,
+  Clapperboard,
+  Rows3,
+  Film,
 } from "lucide-react";
+import { InkosLogo } from "./InkosLogo";
+
+// 历史记录里的会话混装多种类型（chat / short / play / book-create），用图标区分。
+function SessionKindIcon({ kind, className }: { readonly kind?: string; readonly className?: string }) {
+  const Icon =
+    kind === "play" ? Gamepad2
+    : kind === "short" ? ScrollText
+    : kind === "script" ? Clapperboard
+    : kind === "storyboard" ? Rows3
+    : kind === "interactive-film" ? Film
+    : kind === "book-create" ? BookPlus
+    : MessageSquare;
+  return <Icon size={13} className={className} />;
+}
 
 interface BookSummary {
   readonly id: string;
@@ -54,11 +77,12 @@ interface Nav {
   toBook: (id: string) => void;
   toBookCreate: () => void;
   toServices: () => void;
+  toProjectSettings: () => void;
   toDaemon: () => void;
   toLogs: () => void;
   toGenres: () => void;
   toStyle: () => void;
-  toImport: () => void;
+  toImport: (tab?: "chapters" | "canon" | "fanfic" | "spinoff" | "imitation") => void;
   toRadar: () => void;
   toDoctor: () => void;
 }
@@ -81,11 +105,13 @@ export function Sidebar({ nav, activePage, sse, t }: {
   const createDraftSession = useChatStore((s) => s.createDraftSession);
   const renameSession = useChatStore((s) => s.renameSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
+  const setInput = useChatStore((s) => s.setInput);
   const [renameTarget, setRenameTarget] = useState<{ sessionId: string; currentTitle: string } | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{ sessionId: string; title: string } | null>(null);
   const [expandedBooks, setExpandedBooks] = useState<Set<string>>(new Set());
   const [projectChatExpanded, setProjectChatExpanded] = useState(true);
+  const [myBooksExpanded, setMyBooksExpanded] = useState(true);
 
   const books = data?.books ?? [];
   const projectChatKey = "__null__";
@@ -159,6 +185,19 @@ export function Sidebar({ nav, activePage, sse, t }: {
     });
   };
 
+  const openBook = (bookId: string) => {
+    setInput("");
+    setExpandedBooks((prev) => {
+      const next = new Set(prev);
+      next.add(bookId);
+      return next;
+    });
+    if (sessionIdsByBook[bookId] === undefined) {
+      void loadSessionList(bookId);
+    }
+    nav.toBook(bookId);
+  };
+
   const sessionsByBook = useMemo(
     () =>
       Object.fromEntries(
@@ -173,6 +212,7 @@ export function Sidebar({ nav, activePage, sse, t }: {
   );
 
   const openSession = (bookId: string, sessionId: string) => {
+    setInput("");
     activateSession(sessionId);
     nav.toBook(bookId);
     void loadSessionDetail(sessionId);
@@ -182,11 +222,13 @@ export function Sidebar({ nav, activePage, sse, t }: {
     // 前端创建草稿会话：对话区立即变空，但 session 文件不落盘；
     // 发第一条消息时 sendMessage 会调 POST /sessions 真正创建。
     setExpandedBooks((prev) => new Set(prev).add(bookId));
-    createDraftSession(bookId);
+    setInput("");
+    createDraftSession(bookId, "book");
     nav.toBook(bookId);
   };
 
   const openProjectChatSession = (sessionId: string) => {
+    setInput("");
     activateSession(sessionId);
     setProjectChatSessionId(sessionId);
     nav.toChat();
@@ -195,8 +237,24 @@ export function Sidebar({ nav, activePage, sse, t }: {
 
   const handleCreateProjectChatSession = () => {
     setProjectChatExpanded(true);
-    const sessionId = createDraftSession(null);
+    const sessionId = createDraftSession(null, "chat");
     setProjectChatSessionId(sessionId);
+    setInput("");
+    nav.toChat();
+  };
+
+  const handleOpenBookCreate = () => {
+    setInput("");
+    nav.toBookCreate();
+  };
+
+  const launchProjectMode = (kind: "short" | "play" | "script" | "storyboard" | "interactive-film", playMode?: "guided" | "open") => {
+    setProjectChatExpanded(true);
+    // Play mode (分支互动 = guided / 自由互动 = open) is now decided here at the
+    // launcher, not via an in-chat button.
+    const sessionId = createDraftSession(null, kind, playMode);
+    setProjectChatSessionId(sessionId);
+    setInput("");
     nav.toChat();
   };
 
@@ -221,7 +279,7 @@ export function Sidebar({ nav, activePage, sse, t }: {
       <div className="px-6 py-8">
         <button
           onClick={nav.toDashboard}
-          className="group flex items-center gap-2 hover:opacity-80 transition-all duration-300"
+          className="group flex items-center gap-3 hover:opacity-80 transition-all duration-300"
         >
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform">
             <ScrollText size={18} />
@@ -235,48 +293,66 @@ export function Sidebar({ nav, activePage, sse, t }: {
 
       {/* Main Navigation */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-6">
-        {/* Books Section */}
+        {/* InkOS Create Section — always visible, two columns. */}
         <div>
-          <div className="px-3 mb-3 flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-widest text-muted-foreground font-bold">
-              {t("nav.books")}
+          <div className="px-3 mb-2.5">
+            <span className="text-[16px] leading-6 uppercase tracking-[0.1em] text-muted-foreground font-bold">
+              {t("nav.createSection")}
             </span>
-            <button
-              onClick={nav.toBookCreate}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all"
-            >
-              <Plus size={12} />
-              <span>{t("nav.newBook")}</span>
-            </button>
           </div>
+          <div className="grid grid-cols-2 gap-1">
+            <CreateItem icon={<BookPlus size={16} />} label={t("nav.createNovel")} active={activePage === "book-create"} onClick={handleOpenBookCreate} />
+            <CreateItem icon={<ScrollText size={16} />} label={t("nav.createShort")} onClick={() => launchProjectMode("short")} />
+            <CreateItem icon={<Clapperboard size={16} />} label={t("nav.createScript")} onClick={() => launchProjectMode("script")} />
+            <CreateItem icon={<Rows3 size={16} />} label={t("nav.createStoryboard")} onClick={() => launchProjectMode("storyboard")} />
+            <CreateItem icon={<Film size={16} />} label={t("nav.createInteractiveFilm")} onClick={() => launchProjectMode("interactive-film")} />
+            <CreateItem icon={<Feather size={16} />} label={t("nav.createFanfic")} onClick={() => nav.toImport("fanfic")} />
+            <CreateItem icon={<BookCopy size={16} />} label={t("nav.createSpinoff")} onClick={() => nav.toImport("spinoff")} />
+            <CreateItem icon={<Wand2 size={16} />} label={t("nav.createImitation")} onClick={() => nav.toImport("imitation")} />
+            <CreateItem icon={<FileInput size={16} />} label={t("nav.createContinuation")} onClick={() => nav.toImport("chapters")} />
+            <CreateItem icon={<GitBranch size={16} />} label={t("nav.createBranching")} onClick={() => launchProjectMode("play", "guided")} />
+            <CreateItem icon={<Gamepad2 size={16} />} label={t("nav.createFree")} onClick={() => launchProjectMode("play", "open")} />
+          </div>
+        </div>
 
-          <div className="space-y-0.5">
+        {/* My Bookshelf Section */}
+        <div>
+          <SectionHeader label={t("nav.myBooks")} expanded={myBooksExpanded} onToggle={() => setMyBooksExpanded((v) => !v)} />
+          <Collapse open={myBooksExpanded}>
+          <div className="space-y-0.5 pt-1">
             {books.map((book) => {
               const bookSessions = sessionsByBook[book.id] ?? [];
               const isActiveBook = activePage === `book:${book.id}`;
               const isExpanded = expandedBooks.has(book.id);
               return (
                 <div key={book.id}>
-                  {/* 书名行：点击展开折叠，双击进入书 */}
+                  {/* 书名行：箭头展开；标题进入该书，避免聊天区停留在上一本文稿。 */}
                   <div className="group/book flex items-center">
                     <button
                       type="button"
+                      aria-label={isExpanded ? `折叠 ${book.title}` : `展开 ${book.title}`}
                       onClick={() => toggleBook(book.id)}
-                      className={`flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1.5 rounded-md text-sm transition-colors ${
-                        isActiveBook ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-secondary/30"
-                      }`}
+                      className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary/30 hover:text-foreground transition-colors"
                     >
                       <ChevronRight
                         size={12}
-                        className={`shrink-0 text-muted-foreground/60 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                        className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
                       />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openBook(book.id)}
+                      className={`flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pr-2 rounded-md text-[15px] leading-6 transition-colors ${
+                        isActiveBook ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-secondary/30"
+                      }`}
+                    >
                       <FolderOpen size={14} className="shrink-0 text-muted-foreground/60" />
                       <span className="truncate flex-1 text-left">{book.title}</span>
                     </button>
                   </div>
 
                   {/* 展开后才显示 session 列表 + 新建按钮 */}
-                  {isExpanded && (
+                  <Collapse open={isExpanded}>
                     <div className="mt-0.5">
                       {bookSessions.map((session) => {
                         const isActiveSession = isActiveBook && activeSessionId === session.sessionId;
@@ -289,7 +365,7 @@ export function Sidebar({ nav, activePage, sse, t }: {
                             <button
                               type="button"
                               onClick={() => openSession(book.id, session.sessionId)}
-                              className="flex min-w-0 flex-1 items-center gap-2 pl-9 pr-2 py-1 text-left text-[13px] transition-colors"
+                              className="flex min-w-0 flex-1 items-center gap-2 pl-9 pr-2 py-1.5 text-left text-[14px] leading-5 transition-colors"
                             >
                               <span className={`truncate flex-1 ${isActiveSession ? "text-foreground" : "text-muted-foreground group-hover/session:text-foreground"}`}>
                                 {label}
@@ -333,13 +409,13 @@ export function Sidebar({ nav, activePage, sse, t }: {
                       <button
                         type="button"
                         onClick={() => void handleCreateSession(book.id)}
-                        className="w-full flex items-center gap-2 pl-9 pr-2 py-1 text-xs text-muted-foreground/50 hover:text-foreground transition-colors"
+                        className="w-full flex items-center gap-2 pl-9 pr-2 py-1.5 text-[13px] text-muted-foreground/50 hover:text-foreground transition-colors"
                       >
                         <Plus size={12} />
                         <span>新建会话</span>
                       </button>
                     </div>
-                  )}
+                  </Collapse>
                 </div>
               );
             })}
@@ -350,81 +426,29 @@ export function Sidebar({ nav, activePage, sse, t }: {
               </div>
             )}
           </div>
+          </Collapse>
         </div>
 
-        {/* System Section */}
+        {/* Sessions Section */}
         <div>
-          <div className="px-3 mb-3">
-            <span className="text-[11px] uppercase tracking-widest text-muted-foreground font-bold">
-              {t("nav.system")}
-            </span>
-          </div>
-          <div className="space-y-1">
-            <SidebarItem
-              label={t("create.genre")}
-              icon={<Boxes size={16} />}
-              active={activePage === "genres"}
-              onClick={nav.toGenres}
-            />
-            <SidebarItem
-              label={t("nav.config")}
-              icon={<Settings size={16} />}
-              active={activePage === "services"}
-              onClick={nav.toServices}
-            />
-{/*            <SidebarItem
-              label={t("nav.daemon")}
-              icon={<Zap size={16} />}
-              active={activePage === "daemon"}
-              onClick={nav.toDaemon}
-              badge={daemon?.running ? t("nav.running") : undefined}
-              badgeColor={daemon?.running ? "bg-emerald-500/10 text-emerald-500" : "bg-muted text-muted-foreground"}
-            />*/}
-            <SidebarItem
-              label={t("nav.logs")}
-              icon={<Terminal size={16} />}
-              active={activePage === "logs"}
-              onClick={nav.toLogs}
-            />
-          </div>
-        </div>
-
-        {/* Tools Section */}
-        <div>
-          <div className="px-3 mb-3">
-            <span className="text-[11px] uppercase tracking-widest text-muted-foreground font-bold">
-              {t("nav.tools")}
-            </span>
-          </div>
+          <SectionHeader
+            label={t("nav.history")}
+            expanded={projectChatExpanded}
+            onToggle={() => {
+              const next = !projectChatExpanded;
+              setProjectChatExpanded(next);
+              if (next) {
+                nav.toChat();
+                if (sessionIdsByBook[projectChatKey] === undefined) {
+                  void loadSessionList(null);
+                }
+              }
+            }}
+          />
           <div className="space-y-1">
             <div>
-              <div className="group/chat flex items-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProjectChatExpanded((prev) => !prev);
-                    nav.toChat();
-                    if (sessionIdsByBook[projectChatKey] === undefined) {
-                      void loadSessionList(null);
-                    }
-                  }}
-                  className={`flex min-w-0 flex-1 items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all duration-200 ${
-                    activePage === "chat"
-                      ? "bg-secondary text-foreground font-medium shadow-sm border border-border"
-                      : "text-foreground font-medium hover:text-foreground hover:bg-secondary/50"
-                  }`}
-                >
-                  <MessageSquare size={16} className={activePage === "chat" ? "text-primary" : "text-muted-foreground group-hover/chat:text-foreground"} />
-                  <span className="flex-1 text-left">{t("nav.chat")}</span>
-                  <ChevronRight
-                    size={13}
-                    className={`text-muted-foreground/60 transition-transform ${projectChatExpanded ? "rotate-90" : ""}`}
-                  />
-                </button>
-              </div>
-
-              {projectChatExpanded && (
-                <div className="mt-0.5">
+              <Collapse open={projectChatExpanded}>
+                <div className="pt-1">
                   {projectChatSessions.map((session) => {
                     const isActiveSession = activePage === "chat" && activeSessionId === session.sessionId;
                     const label = getSessionLabel(session);
@@ -436,8 +460,12 @@ export function Sidebar({ nav, activePage, sse, t }: {
                         <button
                           type="button"
                           onClick={() => openProjectChatSession(session.sessionId)}
-                          className="flex min-w-0 flex-1 items-center gap-2 pl-9 pr-2 py-1 text-left text-[13px] transition-colors"
+                          className="flex min-w-0 flex-1 items-center gap-2 pl-2 pr-2 py-1.5 text-left text-[14px] leading-5 transition-colors"
                         >
+                          <SessionKindIcon
+                            kind={session.sessionKind}
+                            className={`shrink-0 ${isActiveSession ? "text-foreground" : "text-muted-foreground/60 group-hover/session:text-foreground"}`}
+                          />
                           <span className={`truncate flex-1 ${isActiveSession ? "text-foreground" : "text-muted-foreground group-hover/session:text-foreground"}`}>
                             {label}
                           </span>
@@ -480,23 +508,69 @@ export function Sidebar({ nav, activePage, sse, t }: {
                   <button
                     type="button"
                     onClick={handleCreateProjectChatSession}
-                    className="w-full flex items-center gap-2 pl-9 pr-2 py-1 text-xs text-muted-foreground/50 hover:text-foreground transition-colors"
+                    className="w-full flex items-center gap-2 pl-2 pr-2 py-1.5 text-[13px] text-muted-foreground/50 hover:text-foreground transition-colors"
                   >
                     <Plus size={12} />
                     <span>新建会话</span>
                   </button>
                 </div>
-              )}
+              </Collapse>
             </div>
-            <PersonalizationDialogButton
-              iconSize={16}
-              className={(hasMemory) => `w-full group flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                hasMemory
-                  ? "bg-primary/10 text-primary hover:bg-primary/15"
-                  : "text-foreground hover:text-foreground hover:bg-secondary/50"
-              }`}
-              iconClassName={(hasMemory) => hasMemory ? "text-primary" : "text-muted-foreground group-hover:text-foreground"}
+          </div>
+        </div>
+
+        {/* System Section */}
+        <div>
+          <div className="px-3 mb-3">
+            <span className="text-[11px] uppercase tracking-widest text-muted-foreground font-bold">
+              {t("nav.system")}
+            </span>
+          </div>
+          <div className="space-y-1">
+            <SidebarItem
+              label={t("create.genre")}
+              icon={<Boxes size={16} />}
+              active={activePage === "genres"}
+              onClick={nav.toGenres}
             />
+            <SidebarItem
+              label={t("nav.config")}
+              icon={<Settings size={16} />}
+              active={activePage === "services"}
+              onClick={nav.toServices}
+            />
+            <SidebarItem
+              label={t("nav.projectSettings")}
+              icon={<Settings size={16} />}
+              active={activePage === "project-settings"}
+              onClick={nav.toProjectSettings}
+            />
+            <SidebarItem
+              label={t("nav.daemon")}
+              icon={<Zap size={16} />}
+              active={activePage === "daemon"}
+              onClick={nav.toDaemon}
+              badge={daemon?.running ? t("nav.running") : undefined}
+              badgeColor={daemon?.running ? "bg-emerald-500/10 text-emerald-500" : "bg-muted text-muted-foreground"}
+            />
+            <SidebarItem
+              label={t("nav.logs")}
+              icon={<Terminal size={16} />}
+              active={activePage === "logs"}
+              onClick={nav.toLogs}
+            />
+            <PersonalizationDialogButton />
+          </div>
+        </div>
+
+        {/* Tools Section */}
+        <div>
+          <div className="px-3 mb-3">
+            <span className="text-[11px] uppercase tracking-widest text-muted-foreground font-bold">
+              {t("nav.tools")}
+            </span>
+          </div>
+          <div className="space-y-1">
             <SidebarItem
               label={t("nav.style")}
               icon={<Wand2 size={16} />}
@@ -629,6 +703,59 @@ function formatRelativeTime(sessionId: string): string {
   if (days < 30) return `${days} 天`;
   const months = Math.floor(days / 30);
   return `${months} 个月`;
+}
+
+// Smooth collapse via grid-template-rows 0fr→1fr (content-height-agnostic, no JS measuring).
+function Collapse({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+      <div className="overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
+function SectionHeader({ label, expanded, onToggle }: {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="group flex w-full items-center gap-1.5 px-3 py-2 text-left"
+    >
+      <span className="flex-1 text-[16px] leading-6 uppercase tracking-[0.1em] text-muted-foreground font-bold group-hover:text-foreground transition-colors">
+        {label}
+      </span>
+      <ChevronRight
+        size={15}
+        className={`text-muted-foreground/50 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+      />
+    </button>
+  );
+}
+
+function CreateItem({ icon, label, active, onClick }: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-2.5 text-left text-[16px] leading-6 transition-all ${
+        active
+          ? "border border-border bg-secondary text-foreground font-medium shadow-sm"
+          : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+      }`}
+    >
+      <span className={`shrink-0 ${active ? "text-primary" : ""}`}>{icon}</span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
 }
 
 function SidebarItem({ label, icon, active, onClick, badge, badgeColor }: {

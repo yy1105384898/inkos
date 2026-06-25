@@ -41,14 +41,35 @@ import {
   Scheduler,
   coverSecretKey,
   resolveCoverProviderPreset,
+  SessionKindSchema,
+  isExplicitWriteChapterCommand,
+  isUsablePlayInitialScene,
+  isWriteNextInstruction,
+  normalizeActionSource as normalizeCoreActionSource,
+  normalizeActionPayload as normalizeCoreActionPayload,
+  normalizePlayMode as normalizeCorePlayMode,
+  normalizeRequestedIntent as normalizeCoreRequestedIntent,
+  inferLanguage,
+  type ActionPayload,
+  type ActionSource,
+  createGenerateCoverTool,
+  createInteractiveFilmCreationTool,
+  createPlayStartTool,
+  createScriptCreationTool,
+  createShortFictionRunTool,
+  createStoryboardCreationTool,
+  createSubAgentTool,
   type ResolvedModel,
   type PipelineConfig,
+  type PlayMode,
   type ProjectConfig,
   type LogSink,
   type LogEntry,
+  type RequestedIntent,
+  type SessionKind,
 } from "@actalk/inkos-core";
 import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSafeBookId } from "./safety.js";
 import { ApiError } from "./errors.js";
 import { buildStudioBookConfig } from "./book-create.js";
@@ -80,6 +101,9 @@ const AGENT_LABELS: Record<string, string> = {
 const TOOL_LABELS: Record<string, string> = {
   read: "读取文件", edit: "编辑文件", grep: "搜索", ls: "列目录",
   short_fiction_run: "短篇生产",
+  script_create: "剧本创作",
+  storyboard_create: "分镜创作",
+  interactive_film_create: "互动影游",
   generate_cover: "生成封面",
 };
 
@@ -89,13 +113,13 @@ function resolveToolLabel(tool: string, agent?: string): string {
 }
 
 function summarizeResult(result: unknown): string {
-  if (typeof result === "string") return result.slice(0, 200);
+  if (typeof result === "string") return result.slice(0, 2000);
   if (result && typeof result === "object") {
     const r = result as Record<string, unknown>;
-    if (typeof r.content === "string") return r.content.slice(0, 200);
-    if (typeof r.text === "string") return r.text.slice(0, 200);
+    if (typeof r.content === "string") return r.content.slice(0, 2000);
+    if (typeof r.text === "string") return r.text.slice(0, 2000);
   }
-  return String(result).slice(0, 200);
+  return String(result).slice(0, 2000);
 }
 
 function compareServiceListItems(
@@ -256,6 +280,53 @@ function resolveProjectImageFile(root: string, rawPath: string): { readonly reso
   return { resolved, contentType };
 }
 
+function normalizeProjectGeneratedPath(root: string, rawPath: string, code: string): { readonly relPath: string; readonly resolved: string } {
+  let relPath: string;
+  try {
+    relPath = decodeURIComponent(rawPath).replace(/^\/+/u, "");
+  } catch {
+    throw new ApiError(400, code, "Invalid project artifact path");
+  }
+
+  if (
+    !relPath
+    || relPath.includes("\0")
+    || isAbsolute(relPath)
+    || relPath.split(/[\\/]+/u).includes("..")
+  ) {
+    throw new ApiError(400, code, "Invalid project artifact path");
+  }
+
+  const allowedRoots = ["dramas/", "storyboards/", "interactive-films/", "shorts/", "covers/"];
+  if (!allowedRoots.some((prefix) => relPath.startsWith(prefix))) {
+    throw new ApiError(400, code, "Only generated writing artifacts can be opened");
+  }
+
+  const resolved = resolve(root, relPath);
+  const rel = relative(root, resolved);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new ApiError(400, code, "Invalid project artifact path");
+  }
+
+  return { relPath, resolved };
+}
+
+function resolveProjectTextArtifactFile(root: string, rawPath: string): { readonly relPath: string; readonly resolved: string; readonly contentType: string } {
+  const file = normalizeProjectGeneratedPath(root, rawPath, "INVALID_PROJECT_ARTIFACT_PATH");
+  const ext = file.relPath.split(".").pop()?.toLowerCase() ?? "";
+  const contentTypes: Record<string, string> = {
+    md: "text/markdown; charset=utf-8",
+    markdown: "text/markdown; charset=utf-8",
+    txt: "text/plain; charset=utf-8",
+    json: "application/json; charset=utf-8",
+  };
+  const contentType = contentTypes[ext];
+  if (!contentType) {
+    throw new ApiError(415, "UNSUPPORTED_PROJECT_ARTIFACT_TYPE", "Unsupported project artifact type");
+  }
+  return { ...file, contentType };
+}
+
 function isLikelyFailedToolResult(exec: CollectedToolExec): boolean {
   if (exec.status === "error") return true;
   const text = `${exec.error ?? ""}\n${exec.result ?? ""}`.toLowerCase();
@@ -274,10 +345,67 @@ function hasSuccessfulSubAgentExec(
   );
 }
 
-function isWriteNextInstruction(instruction: string): boolean {
+function isLikelyWriteNextInstruction(instruction: string): boolean {
   const trimmed = instruction.trim();
   return /^(continue|继续|继续写|写下一章|write next|下一章|再来一章)$/i.test(trimmed)
     || /(继续写|写下一章|下一章|再来一章|write\s+next)/i.test(trimmed);
+}
+
+function normalizeStudioSessionKind(value: unknown, fallback: SessionKind): SessionKind {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = SessionKindSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiError(400, "INVALID_SESSION_KIND", `Invalid sessionKind: ${String(value)}`);
+  }
+  return parsed.data;
+}
+
+function normalizeStudioActionSource(value: unknown): ActionSource {
+  try {
+    return normalizeCoreActionSource(value);
+  } catch {
+    throw new ApiError(400, "INVALID_ACTION_SOURCE", `Invalid actionSource: ${String(value)}`);
+  }
+}
+
+function normalizeStudioRequestedIntent(value: unknown): RequestedIntent | undefined {
+  try {
+    return normalizeCoreRequestedIntent(value);
+  } catch {
+    throw new ApiError(400, "INVALID_REQUESTED_INTENT", `Invalid requestedIntent: ${String(value)}`);
+  }
+}
+
+function normalizeStudioActionPayload(value: unknown): ActionPayload | undefined {
+  try {
+    return normalizeCoreActionPayload(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ApiError(400, "INVALID_ACTION_PAYLOAD", `Invalid actionPayload: ${message}`);
+  }
+}
+
+function normalizeStudioPlayMode(value: unknown): PlayMode | undefined {
+  try {
+    return normalizeCorePlayMode(value);
+  } catch {
+    throw new ApiError(400, "INVALID_PLAY_MODE", `Invalid playMode: ${String(value)}`);
+  }
+}
+
+function shouldRunDirectWriteNext(args: {
+  readonly instruction: string;
+  readonly agentBookId: string | null | undefined;
+  readonly sessionKind: SessionKind;
+  readonly actionSource: ActionSource;
+  readonly requestedIntent?: RequestedIntent;
+}): boolean {
+  if (!args.agentBookId || args.sessionKind !== "book") return false;
+  if (args.requestedIntent && args.requestedIntent !== "write_next") return false;
+  if (args.actionSource === "quick-action" || args.actionSource === "button") {
+    return args.requestedIntent === "write_next" || isWriteNextInstruction(args.instruction);
+  }
+  return args.requestedIntent === "write_next" || isWriteNextInstruction(args.instruction);
 }
 
 type ExternalChatEditResult = {
@@ -498,7 +626,7 @@ function validateAgentActionExecution(args: {
 
   if (
     args.agentBookId
-    && isWriteNextInstruction(args.instruction)
+    && isLikelyWriteNextInstruction(args.instruction)
     && !hasSuccessfulSubAgentExec(args.collectedToolExecs, "writer")
   ) {
     return "模型声称已完成下一章，但没有实际调用写作工具。请重试；如果仍失败，请检查模型是否支持工具调用。";
@@ -528,6 +656,301 @@ interface CollectedToolExec {
   stages?: Array<{ label: string; status: "pending" | "completed" }>;
   startedAt: number;
   completedAt?: number;
+}
+
+class ConfirmedActionExecutionError extends Error {
+  readonly exec: CollectedToolExec;
+
+  constructor(message: string, exec: CollectedToolExec, cause?: unknown) {
+    super(message);
+    this.name = "ConfirmedActionExecutionError";
+    this.exec = exec;
+    if (cause !== undefined) {
+      (this as { cause?: unknown }).cause = cause;
+    }
+  }
+}
+
+function suppressManualTextForTool(exec: CollectedToolExec): boolean {
+  return exec.tool === "play_start"
+    || exec.tool === "play_step"
+    || exec.tool === "play_revise"
+    || exec.tool === "script_create"
+    || exec.tool === "storyboard_create"
+    || exec.tool === "interactive_film_create";
+}
+
+function manualToolAssistantMessage(
+  responseText: string,
+  exec: CollectedToolExec,
+  provider: string,
+  model: string,
+): any {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: suppressManualTextForTool(exec) ? "" : responseText }],
+    api: "anthropic-messages",
+    provider,
+    model,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "toolUse",
+    timestamp: Date.now(),
+  };
+}
+
+function manualToolAppendOptions(sessionKind: SessionKind, exec: CollectedToolExec): {
+  readonly sessionKind: SessionKind;
+  readonly legacyDisplay: { readonly toolExecutions: readonly CollectedToolExec[] };
+} {
+  return {
+    sessionKind,
+    legacyDisplay: { toolExecutions: [exec] },
+  };
+}
+
+function isConfirmedProductionAction(args: {
+  readonly actionSource: ActionSource;
+  readonly requestedIntent?: RequestedIntent;
+}): boolean {
+  return (args.actionSource === "button" || args.actionSource === "slash")
+    && (
+      args.requestedIntent === "create_book"
+    || args.requestedIntent === "short_run"
+    || args.requestedIntent === "script_create"
+    || args.requestedIntent === "storyboard_create"
+    || args.requestedIntent === "interactive_film_create"
+    || args.requestedIntent === "play_start"
+      || args.requestedIntent === "generate_cover"
+    );
+}
+
+function requirePayloadText(value: string | undefined, message: string): string {
+  const text = value?.trim();
+  if (!text) {
+    throw new ApiError(400, "CONFIRMED_ACTION_PAYLOAD_INCOMPLETE", message);
+  }
+  return text;
+}
+
+function toolResultText(result: unknown): string {
+  const text = extractToolError(result).trim();
+  return text || "已完成。";
+}
+
+async function executeConfirmedProductionAction(args: {
+  readonly pipeline: PipelineRunner;
+  readonly root: string;
+  readonly sessionId: string;
+  readonly streamSessionId: string;
+  readonly instruction: string;
+  readonly requestedIntent: RequestedIntent;
+  readonly actionPayload?: ActionPayload;
+  readonly playMode?: PlayMode;
+}): Promise<CollectedToolExec> {
+  const id = `direct-${args.requestedIntent}-${Date.now().toString(36)}`;
+  const actionPayload = args.actionPayload;
+  let tool: ReturnType<typeof createSubAgentTool>
+    | ReturnType<typeof createShortFictionRunTool>
+    | ReturnType<typeof createGenerateCoverTool>
+    | ReturnType<typeof createScriptCreationTool>
+    | ReturnType<typeof createStoryboardCreationTool>
+    | ReturnType<typeof createInteractiveFilmCreationTool>
+    | ReturnType<typeof createPlayStartTool>;
+  let params: Record<string, unknown>;
+  let agent: string | undefined;
+
+  if (args.requestedIntent === "create_book") {
+    const payload = actionPayload?.createBook;
+    const title = requirePayloadText(payload?.title, "确认建书缺少书名，请重新生成确认卡。");
+    tool = createSubAgentTool(args.pipeline, null, args.root, { actionPayload });
+    agent = "architect";
+    params = {
+      agent,
+      instruction: args.instruction,
+      title,
+      ...(payload?.genre ? { genre: payload.genre } : {}),
+      ...(payload?.platform ? { platform: payload.platform } : {}),
+      ...(payload?.language ? { language: payload.language } : {}),
+      ...(payload?.targetChapters ? { targetChapters: payload.targetChapters } : {}),
+      ...(payload?.chapterWordCount ? { chapterWordCount: payload.chapterWordCount } : {}),
+    };
+  } else if (args.requestedIntent === "short_run") {
+    const payload = actionPayload?.shortRun;
+    const direction = payload?.direction?.trim() || args.instruction.trim();
+    if (!direction) throw new ApiError(400, "CONFIRMED_ACTION_PAYLOAD_INCOMPLETE", "确认短篇缺少方向，请重新生成确认卡。");
+    tool = createShortFictionRunTool(args.pipeline, args.root, { actionPayload });
+    params = {
+      direction,
+      ...(payload?.reference ? { reference: payload.reference } : {}),
+      ...(payload?.storyId ? { storyId: payload.storyId } : {}),
+      ...(payload?.chapters ? { chapters: payload.chapters } : {}),
+      ...(payload?.charsPerChapter ? { charsPerChapter: payload.charsPerChapter } : {}),
+      ...(payload?.cover !== undefined ? { cover: payload.cover } : {}),
+    };
+  } else if (args.requestedIntent === "generate_cover") {
+    const payload = actionPayload?.generateCover;
+    const title = requirePayloadText(payload?.title, "确认生成封面缺少标题，请重新生成确认卡。");
+    tool = createGenerateCoverTool(args.root, { actionPayload });
+    params = {
+      title,
+      ...(payload?.intro ? { intro: payload.intro } : {}),
+      ...(payload?.sellingPoints ? { sellingPoints: payload.sellingPoints } : {}),
+      ...(payload?.coverPrompt ? { coverPrompt: payload.coverPrompt } : {}),
+      ...(payload?.outputDir ? { outputDir: payload.outputDir } : {}),
+    };
+  } else if (args.requestedIntent === "script_create") {
+    const payload = actionPayload?.scriptCreate;
+    const title = requirePayloadText(payload?.title, "确认创建剧本缺少标题，请重新生成确认卡。");
+    tool = createScriptCreationTool(args.pipeline, args.root, { actionPayload });
+    params = {
+      title,
+      instruction: args.instruction,
+      ...(payload?.sourceKind ? { sourceKind: payload.sourceKind } : {}),
+      ...(payload?.targetFormat ? { targetFormat: payload.targetFormat } : {}),
+      ...(payload?.sourceText ? { sourceText: payload.sourceText } : {}),
+      ...(payload?.sourcePath ? { sourcePath: payload.sourcePath } : {}),
+      ...(payload?.requirements ? { requirements: payload.requirements } : {}),
+      ...(payload?.episodeCount ? { episodeCount: payload.episodeCount } : {}),
+      ...(payload?.episodeDuration ? { episodeDuration: payload.episodeDuration } : {}),
+      ...(payload?.projectId ? { projectId: payload.projectId } : {}),
+      ...(payload?.outDir ? { outDir: payload.outDir } : {}),
+    };
+  } else if (args.requestedIntent === "storyboard_create") {
+    const payload = actionPayload?.storyboardCreate;
+    const title = requirePayloadText(payload?.title, "确认创建分镜缺少标题，请重新生成确认卡。");
+    tool = createStoryboardCreationTool(args.pipeline, args.root, { actionPayload });
+    params = {
+      title,
+      instruction: args.instruction,
+      ...(payload?.sourceKind ? { sourceKind: payload.sourceKind } : {}),
+      ...(payload?.sourceText ? { sourceText: payload.sourceText } : {}),
+      ...(payload?.sourcePath ? { sourcePath: payload.sourcePath } : {}),
+      ...(payload?.requirements ? { requirements: payload.requirements } : {}),
+      ...(payload?.visualStyle ? { visualStyle: payload.visualStyle } : {}),
+      ...(payload?.aspectRatio ? { aspectRatio: payload.aspectRatio } : {}),
+      ...(payload?.granularity ? { granularity: payload.granularity } : {}),
+      ...(payload?.maxShots ? { maxShots: payload.maxShots } : {}),
+      ...(payload?.projectId ? { projectId: payload.projectId } : {}),
+      ...(payload?.outDir ? { outDir: payload.outDir } : {}),
+    };
+  } else if (args.requestedIntent === "interactive_film_create") {
+    const payload = actionPayload?.interactiveFilmCreate;
+    const title = requirePayloadText(payload?.title, "确认创建互动影游缺少标题，请重新生成确认卡。");
+    tool = createInteractiveFilmCreationTool(args.pipeline, args.root, { actionPayload });
+    params = {
+      title,
+      instruction: args.instruction,
+      ...(payload?.sourceKind ? { sourceKind: payload.sourceKind } : {}),
+      ...(payload?.sourceText ? { sourceText: payload.sourceText } : {}),
+      ...(payload?.sourcePath ? { sourcePath: payload.sourcePath } : {}),
+      ...(payload?.requirements ? { requirements: payload.requirements } : {}),
+      ...(payload?.targetAudience ? { targetAudience: payload.targetAudience } : {}),
+      ...(payload?.episodeCount ? { episodeCount: payload.episodeCount } : {}),
+      ...(payload?.episodeDuration ? { episodeDuration: payload.episodeDuration } : {}),
+      ...(payload?.budget ? { budget: payload.budget } : {}),
+      ...(payload?.referenceMode ? { referenceMode: payload.referenceMode } : {}),
+      ...(payload?.projectId ? { projectId: payload.projectId } : {}),
+      ...(payload?.outDir ? { outDir: payload.outDir } : {}),
+    };
+  } else if (args.requestedIntent === "play_start") {
+    const payload = actionPayload?.playStart;
+    const title = requirePayloadText(payload?.title, "确认启动互动世界缺少标题，请重新生成确认卡。");
+    const fallbackScene = [payload?.premise, args.instruction].filter((part): part is string => typeof part === "string" && part.trim().length > 0).join("\n\n");
+    const initialScene = isUsablePlayInitialScene(payload?.initialScene)
+      ? payload?.initialScene?.trim()
+      : fallbackScene.trim();
+    const confirmedActionPayload: ActionPayload | undefined = actionPayload
+      ? {
+        ...actionPayload,
+        playStart: {
+          ...payload,
+          title,
+          ...(initialScene ? { initialScene } : {}),
+        },
+      }
+      : undefined;
+    tool = createPlayStartTool(args.pipeline, args.root, args.sessionId, args.playMode, { actionPayload: confirmedActionPayload });
+    params = {
+      title,
+      ...(payload?.premise ? { premise: payload.premise } : {}),
+      ...(payload?.worldContract ? { worldContract: payload.worldContract } : {}),
+      ...(payload?.visualContract ? { visualContract: payload.visualContract } : {}),
+      ...(payload?.mode ? { mode: payload.mode } : {}),
+      ...(initialScene ? { initialScene } : {}),
+      ...(payload?.suggestedActions ? { suggestedActions: payload.suggestedActions } : {}),
+    };
+  } else {
+    throw new ApiError(400, "UNSUPPORTED_CONFIRMED_ACTION", `Unsupported confirmed action: ${args.requestedIntent}`);
+  }
+
+  const exec: CollectedToolExec = {
+    id,
+    tool: tool.name,
+    agent,
+    label: resolveToolLabel(tool.name, agent),
+    status: "running",
+    args: params,
+    stages: agent ? PIPELINE_STAGES[agent]?.map(label => ({ label, status: "pending" as const })) : undefined,
+    startedAt: Date.now(),
+  };
+
+  broadcast("tool:start", {
+    sessionId: args.streamSessionId,
+    id,
+    tool: tool.name,
+    args: params,
+    stages: exec.stages?.map(stage => stage.label),
+  });
+
+  try {
+    const result = await tool.execute(
+      id,
+      params as never,
+      undefined,
+      (partialResult) => {
+        broadcast("tool:update", {
+          sessionId: args.streamSessionId,
+          tool: tool.name,
+          partialResult,
+        });
+      },
+    );
+    exec.status = "completed";
+    exec.completedAt = Date.now();
+    exec.result = toolResultText(result);
+    exec.details = (result as { details?: unknown } | undefined)?.details;
+    exec.stages = exec.stages?.map(stage => ({ ...stage, status: "completed" as const }));
+    broadcast("tool:end", {
+      sessionId: args.streamSessionId,
+      id,
+      tool: tool.name,
+      result,
+      details: exec.details,
+      isError: false,
+    });
+    return exec;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const result = { content: [{ type: "text", text: message }] };
+    exec.status = "error";
+    exec.completedAt = Date.now();
+    exec.error = message;
+    broadcast("tool:end", {
+      sessionId: args.streamSessionId,
+      id,
+      tool: tool.name,
+      result,
+      isError: true,
+    });
+    throw new ConfirmedActionExecutionError(message, exec, error);
+  }
 }
 
 interface StudioBookListSummary {
@@ -563,9 +986,14 @@ type LLMConfigSource = "env" | "studio";
 interface EnvConfigSummary {
   detected: boolean;
   provider: string | null;
+  service: string | null;
   baseUrl: string | null;
   model: string | null;
   hasApiKey: boolean;
+}
+
+interface EnvConfigValues extends EnvConfigSummary {
+  apiKey: string | null;
 }
 
 interface EnvConfigStatus {
@@ -875,7 +1303,62 @@ async function saveRawConfig(root: string, config: Record<string, unknown>): Pro
   await writeFile(join(root, "inkos.json"), JSON.stringify(config, null, 2), "utf-8");
 }
 
-async function readEnvConfigSummary(path: string): Promise<EnvConfigSummary> {
+type ChapterReviewMode = "auto" | "manual";
+
+function normalizeChapterReviewMode(mode: unknown): ChapterReviewMode {
+  return mode === "manual" ? "manual" : "auto";
+}
+
+function readProjectChapterReviewMode(config: Record<string, unknown>): ChapterReviewMode {
+  const writing = config.writing && typeof config.writing === "object" && !Array.isArray(config.writing)
+    ? config.writing as Record<string, unknown>
+    : {};
+  return normalizeChapterReviewMode(writing.reviewMode);
+}
+
+function readBookChapterReviewMode(rawBook: Record<string, unknown>): ChapterReviewMode | undefined {
+  const writing = rawBook.writing && typeof rawBook.writing === "object" && !Array.isArray(rawBook.writing)
+    ? rawBook.writing as Record<string, unknown>
+    : undefined;
+  if (!writing || writing.reviewMode !== "manual" && writing.reviewMode !== "auto") return undefined;
+  return writing.reviewMode;
+}
+
+async function loadRawBookConfig(root: string, bookId: string): Promise<Record<string, unknown>> {
+  const raw = await readFile(join(root, "books", bookId, "book.json"), "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+async function resolveBookChapterReviewMode(root: string, bookId: string | undefined, projectMode: ChapterReviewMode): Promise<ChapterReviewMode> {
+  if (!bookId || !isSafeBookId(bookId)) return projectMode;
+  try {
+    const rawBook = await loadRawBookConfig(root, bookId);
+    return readBookChapterReviewMode(rawBook) ?? projectMode;
+  } catch {
+    return projectMode;
+  }
+}
+
+function unquoteEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if ((trimmed.startsWith("\"") && trimmed.endsWith("\"")) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function toEnvConfigSummary(values: EnvConfigValues): EnvConfigSummary {
+  return {
+    detected: values.detected,
+    provider: values.provider,
+    service: values.service ?? null,
+    baseUrl: values.baseUrl,
+    model: values.model,
+    hasApiKey: values.hasApiKey,
+  };
+}
+
+async function readEnvConfigValues(path: string): Promise<EnvConfigValues> {
   try {
     const raw = await readFile(path, "utf-8");
     const values = new Map<string, string>();
@@ -886,36 +1369,43 @@ async function readEnvConfigSummary(path: string): Promise<EnvConfigSummary> {
       const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
       if (!match) continue;
       const [, key, value] = match;
-      values.set(key, value.trim());
+      values.set(key, unquoteEnvValue(value));
     }
 
     const provider = values.get("INKOS_LLM_PROVIDER") ?? null;
+    const service = values.get("INKOS_LLM_SERVICE") ?? null;
     const baseUrl = values.get("INKOS_LLM_BASE_URL") ?? null;
     const model = values.get("INKOS_LLM_MODEL") ?? null;
     const apiKey = values.get("INKOS_LLM_API_KEY") ?? "";
-    const detected = Boolean(provider || baseUrl || model || apiKey);
+    const detected = Boolean(provider || service || baseUrl || model || apiKey);
 
     return {
       detected,
       provider,
+      service,
       baseUrl,
       model,
       hasApiKey: apiKey.length > 0,
+      apiKey: apiKey.length > 0 ? apiKey : null,
     };
   } catch {
     return {
       detected: false,
       provider: null,
+      service: null,
       baseUrl: null,
       model: null,
       hasApiKey: false,
+      apiKey: null,
     };
   }
 }
 
 async function readEnvConfigStatus(root: string): Promise<EnvConfigStatus> {
-  const project = await readEnvConfigSummary(join(root, ".env"));
-  const global = await readEnvConfigSummary(GLOBAL_ENV_PATH);
+  const projectValues = await readEnvConfigValues(join(root, ".env"));
+  const globalValues = await readEnvConfigValues(GLOBAL_ENV_PATH);
+  const project = toEnvConfigSummary(projectValues);
+  const global = toEnvConfigSummary(globalValues);
   return {
     project,
     global,
@@ -1494,6 +1984,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       readonly llmOverride?: StudioBrowserLlmOverride;
       readonly service?: string;
       readonly selectedModel?: string;
+      readonly bookIdForSettings?: string;
     },
   ): Promise<PipelineConfig> {
     const currentConfig = overrides?.currentConfig ?? await loadCurrentProjectConfig();
@@ -1524,6 +2015,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         ...(configuredEntry?.stream !== undefined ? { stream: configuredEntry.stream } : {}),
       };
     }
+    const projectReviewMode = readProjectChapterReviewMode(currentConfig as unknown as Record<string, unknown>);
+    const chapterReviewMode = await resolveBookChapterReviewMode(root, overrides?.bookIdForSettings, projectReviewMode);
     const scopedSseSink: LogSink = overrides?.sessionIdForSSE
       ? {
           write(entry) {
@@ -1544,7 +2037,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       defaultLLMConfig: effectiveLlmConfig,
       foundationReviewRetries: currentConfig.foundation?.reviewRetries ?? 2,
       writingReviewRetries: currentConfig.writing?.reviewRetries ?? 1,
-      chapterReviewMode: currentConfig.writing?.reviewMode ?? "auto",
+      chapterReviewMode,
       modelOverrides: currentConfig.modelOverrides,
       notifyChannels: currentConfig.notify,
       logger,
@@ -1846,7 +2339,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     broadcast("write:start", { bookId: id });
 
     // Fire and forget — progress/completion/errors pushed via SSE
-    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride }));
+    const pipeline = new PipelineRunner(await buildPipelineConfig({ llmOverride, bookIdForSettings: id }));
     pipeline.writeNextChapter(id, body.wordCount).then(
       (result) => {
         broadcast("write:complete", { bookId: id, chapterNumber: result.chapterNumber, status: result.status, title: result.title, wordCount: result.wordCount });
@@ -2415,9 +2908,19 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   // --- Project info ---
 
   app.get("/api/v1/project", async (c) => {
-    const currentConfig = await loadCurrentProjectConfig({ requireApiKey: false });
-    // Check if language was explicitly set in inkos.json (not just the schema default)
-    const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
+    let currentConfig: ProjectConfig;
+    let raw: Record<string, unknown>;
+    try {
+      currentConfig = await loadCurrentProjectConfig({ requireApiKey: false });
+      // Check if language was explicitly set in inkos.json (not just the schema default)
+      raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8")) as Record<string, unknown>;
+    } catch (error) {
+      throw new ApiError(
+        500,
+        "PROJECT_CONFIG_INVALID",
+        `Failed to load inkos.json: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     const languageExplicit = "language" in raw && raw.language !== "";
 
     return c.json({
@@ -2446,6 +2949,42 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     } catch {
       return c.notFound();
     }
+  });
+
+  app.get("/api/v1/project/artifacts/:file{.+}", async (c) => {
+    const file = resolveProjectTextArtifactFile(root, c.req.param("file"));
+
+    try {
+      const content = await readFile(file.resolved, "utf-8");
+      return c.json({
+        path: file.relPath,
+        content,
+        contentType: file.contentType,
+        size: Buffer.byteLength(content, "utf-8"),
+      });
+    } catch {
+      return c.notFound();
+    }
+  });
+
+  app.put("/api/v1/project/artifacts/:file{.+}", async (c) => {
+    const file = resolveProjectTextArtifactFile(root, c.req.param("file"));
+    const body = await c.req.json<unknown>().catch(() => null);
+    const content = body && typeof body === "object" && "content" in body
+      ? (body as { readonly content?: unknown }).content
+      : undefined;
+    if (typeof content !== "string") {
+      throw new ApiError(400, "INVALID_PROJECT_ARTIFACT_BODY", "content must be a string");
+    }
+
+    await mkdir(dirname(file.resolved), { recursive: true });
+    await writeFile(file.resolved, content, "utf-8");
+    return c.json({
+      ok: true,
+      path: file.relPath,
+      contentType: file.contentType,
+      size: Buffer.byteLength(content, "utf-8"),
+    });
   });
 
   // --- Config editing ---
@@ -2698,10 +3237,28 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   });
 
   app.post("/api/v1/agent", async (c) => {
-    const { instruction, activeBookId, sessionId: reqSessionId, model: reqModel, service: reqService, llmOverride: rawLlmOverride, coverOverride: rawCoverOverride } = await c.req.json<{
+    const {
+      instruction,
+      activeBookId,
+      sessionId: reqSessionId,
+      sessionKind: reqSessionKind,
+      actionSource: reqActionSource,
+      requestedIntent: reqRequestedIntent,
+      actionPayload: reqActionPayload,
+      playMode: reqPlayMode,
+      model: reqModel,
+      service: reqService,
+      llmOverride: rawLlmOverride,
+      coverOverride: rawCoverOverride,
+    } = await c.req.json<{
       instruction: string;
       activeBookId?: string;
       sessionId?: string;
+      sessionKind?: string;
+      actionSource?: string;
+      requestedIntent?: string;
+      actionPayload?: unknown;
+      playMode?: string;
       model?: string;
       service?: string;
       llmOverride?: unknown;
@@ -2720,8 +3277,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       const message = nonTextModelMessage(reqModel);
       return c.json({ error: message, response: message }, 400);
     }
+    const actionSource = normalizeStudioActionSource(reqActionSource);
+    const requestedIntent = normalizeStudioRequestedIntent(reqRequestedIntent);
+    const actionPayload = normalizeStudioActionPayload(reqActionPayload);
+    const playMode = normalizeStudioPlayMode(reqPlayMode);
 
-    broadcast("agent:start", { instruction, activeBookId, sessionId });
+    broadcast("agent:start", { instruction, activeBookId, sessionId, actionSource, requestedIntent });
 
     try {
       // Load config + create LLM client (pipeline created after model resolution)
@@ -2748,6 +3309,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         );
       }
       const agentBookId = requestedActiveBookId ?? persistedBookId;
+      const sessionKind = normalizeStudioSessionKind(
+        reqSessionKind,
+        bookSession.sessionKind ?? (agentBookId ? "book" : "chat"),
+      );
+      if (bookSession.sessionKind !== sessionKind || (playMode && bookSession.playMode !== playMode)) {
+        const updatedSession = await createAndPersistBookSession(
+          root,
+          bookSession.bookId,
+          bookSession.sessionId,
+          sessionKind,
+          ...(playMode ? [{ playMode }] as const : []),
+        );
+        bookSession = updatedSession;
+      }
       if (agentBookId) {
         try {
           await state.loadBookConfig(agentBookId);
@@ -2775,12 +3350,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         }
       };
 
-      const externalEdit = await tryHandleExternalChatEdit({
-        root,
-        state,
-        instruction,
-        activeBookId: agentBookId,
-      });
+      const externalEdit = requestedIntent === "edit_artifact" || sessionKind === "edit"
+        ? await tryHandleExternalChatEdit({
+            root,
+            state,
+            instruction,
+            activeBookId: agentBookId,
+          })
+        : null;
       if (externalEdit) {
         await appendManualSessionMessages(root, bookSession.sessionId, [{
           role: "assistant",
@@ -2798,13 +3375,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           },
           stopReason: "stop",
           timestamp: Date.now(),
-        }], instruction);
+        }], instruction, { sessionKind });
         await refreshBookSessionFromTranscript();
-        broadcast("agent:complete", { instruction, activeBookId: externalEdit.activeBookId, sessionId: bookSession.sessionId });
+        broadcast("agent:complete", { instruction, activeBookId: externalEdit.activeBookId, sessionId: bookSession.sessionId, sessionKind });
         return c.json({
           response: externalEdit.responseText,
           session: {
             sessionId: bookSession.sessionId,
+            sessionKind,
             ...(externalEdit.activeBookId ? { activeBookId: externalEdit.activeBookId } : {}),
           },
         });
@@ -2939,12 +3517,112 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         currentConfig: config,
         sessionIdForSSE: bookSession.sessionId,
         llmOverride,
+        bookIdForSettings: agentBookId ?? undefined,
       }));
 
-      if (agentBookId && isWriteNextInstruction(instruction)) {
+      if (requestedIntent && isConfirmedProductionAction({ actionSource, requestedIntent })) {
+        const pendingBookId = requestedIntent === "create_book" && actionPayload?.createBook?.title
+          ? deriveBookIdFromTitle(actionPayload.createBook.title)
+          : null;
+        if (pendingBookId) {
+          bookCreateStatus.set(pendingBookId, { status: "creating" });
+          broadcast("book:creating", {
+            bookId: pendingBookId,
+            title: actionPayload?.createBook?.title ?? pendingBookId,
+            sessionId: streamSessionId,
+          });
+        }
+
+        try {
+          const exec = await executeConfirmedProductionAction({
+            pipeline,
+            root,
+            sessionId: bookSession.sessionId,
+            streamSessionId,
+            instruction,
+            requestedIntent,
+            actionPayload,
+            ...(playMode ? { playMode } : {}),
+          });
+
+          let createdBookId: string | null = null;
+          if (exec.tool === "sub_agent" && exec.agent === "architect" && exec.status === "completed") {
+            createdBookId = resolveCreatedBookIdFromToolExecs([exec]);
+            if (createdBookId) {
+              try {
+                const migratedSession = await migrateBookSession(root, bookSession.sessionId, createdBookId);
+                if (migratedSession) {
+                  bookSession = migratedSession;
+                }
+              } catch (e) {
+                if (!(e instanceof SessionAlreadyMigratedError)) {
+                  throw e;
+                }
+              }
+              const book = await loadStudioBookListSummary(state, createdBookId).catch(() => undefined);
+              bookCreateStatus.delete(createdBookId);
+              broadcast("book:created", {
+                bookId: createdBookId,
+                sessionId: bookSession.sessionId,
+                ...(book ? { book } : {}),
+              });
+            }
+          }
+
+          const responseText = exec.result ?? "已完成。";
+          const responseForUser = suppressManualTextForTool(exec) ? "" : responseText;
+          await appendManualSessionMessages(root, bookSession.sessionId, [
+            manualToolAssistantMessage(
+              responseText,
+              exec,
+              configuredEntry?.service ?? reqService ?? config.llm.provider,
+              reqModel ?? config.llm.model,
+            ),
+          ], instruction, manualToolAppendOptions(sessionKind, exec));
+          await refreshBookSessionFromTranscript();
+          broadcast("agent:complete", { instruction, activeBookId: createdBookId ?? agentBookId, sessionId: bookSession.sessionId, sessionKind });
+          return c.json({
+            response: responseForUser,
+            details: { toolExecutions: [exec] },
+            session: {
+              sessionId: bookSession.sessionId,
+              sessionKind,
+              ...(createdBookId ?? agentBookId ? { activeBookId: createdBookId ?? agentBookId } : {}),
+            },
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (pendingBookId) {
+            bookCreateStatus.set(pendingBookId, { status: "error", error: message });
+            broadcast("book:error", { bookId: pendingBookId, sessionId: streamSessionId, error: message });
+          }
+          if (error instanceof ConfirmedActionExecutionError) {
+            await appendManualSessionMessages(root, bookSession.sessionId, [
+              manualToolAssistantMessage(
+                message,
+                error.exec,
+                configuredEntry?.service ?? reqService ?? config.llm.provider,
+                reqModel ?? config.llm.model,
+              ),
+            ], instruction, manualToolAppendOptions(sessionKind, error.exec)).catch(() => undefined);
+            await refreshBookSessionFromTranscript().catch(() => undefined);
+          }
+          broadcast("agent:error", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId, sessionKind, error: message });
+          return c.json({
+            error: { code: "AGENT_ACTION_FAILED", message },
+            response: message,
+          }, 502);
+        }
+      }
+
+      if (shouldRunDirectWriteNext({ instruction, agentBookId, sessionKind, actionSource, requestedIntent })) {
+        const directWriteBookId = agentBookId;
+        if (!directWriteBookId) {
+          throw new ApiError(400, "BOOK_ID_REQUIRED", "write_next requires an active book");
+        }
         const toolCallId = `direct-writer-${Date.now().toString(36)}`;
-        const toolArgs = { agent: "writer", bookId: agentBookId };
-        broadcast("write:start", { bookId: agentBookId, sessionId: streamSessionId });
+        const toolArgs = { agent: "writer", bookId: directWriteBookId };
+        broadcast("write:start", { bookId: directWriteBookId, sessionId: streamSessionId });
         broadcast("tool:start", {
           sessionId: streamSessionId,
           id: toolCallId,
@@ -2953,10 +3631,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           stages: PIPELINE_STAGES.writer,
         });
 
-        pipeline.writeNextChapter(agentBookId).then(
+        pipeline.writeNextChapter(directWriteBookId).then(
           async (writeResult) => {
           const responseText = [
-            `已为 ${agentBookId} 完成第 ${writeResult.chapterNumber} 章`,
+            `已为 ${directWriteBookId} 完成第 ${writeResult.chapterNumber} 章`,
             writeResult.title ? `《${writeResult.title}》` : "",
             `，字数 ${writeResult.wordCount}，状态 ${writeResult.status}。`,
           ].join("");
@@ -2964,7 +3642,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             content: [{ type: "text", text: responseText }],
             details: {
               kind: "chapter_written",
-              bookId: agentBookId,
+              bookId: directWriteBookId,
               chapterNumber: writeResult.chapterNumber,
               title: writeResult.title,
               wordCount: writeResult.wordCount,
@@ -2981,7 +3659,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             isError: false,
           });
           broadcast("write:complete", {
-            bookId: agentBookId,
+            bookId: directWriteBookId,
             sessionId: streamSessionId,
             chapterNumber: writeResult.chapterNumber,
             status: writeResult.status,
@@ -3006,7 +3684,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             timestamp: Date.now(),
           }], instruction);
           await refreshBookSessionFromTranscript();
-          broadcast("agent:complete", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId });
+          broadcast("agent:complete", { instruction, activeBookId: directWriteBookId, sessionId: bookSession.sessionId, sessionKind });
           },
           (error) => {
           const message = error instanceof Error ? error.message : String(error);
@@ -3018,8 +3696,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             result: toolResult,
             isError: true,
           });
-          broadcast("write:error", { bookId: agentBookId, sessionId: streamSessionId, error: message });
-          broadcast("agent:error", { instruction, activeBookId: agentBookId, sessionId: bookSession.sessionId, error: message });
+          broadcast("write:error", { bookId: directWriteBookId, sessionId: streamSessionId, error: message });
+          broadcast("agent:error", { instruction, activeBookId: directWriteBookId, sessionId: bookSession.sessionId, sessionKind, error: message });
           },
         );
         return c.json({
@@ -3534,6 +4212,115 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const { writeFile: writeFileFs } = await import("node:fs/promises");
     await writeFileFs(configPath, JSON.stringify(raw, null, 2), "utf-8");
     return c.json({ ok: true });
+  });
+
+  // --- Global default model ---
+
+  app.get("/api/v1/project/default-model", async (c) => {
+    const raw = await loadRawConfig(root);
+    const llm = raw.llm && typeof raw.llm === "object" && !Array.isArray(raw.llm)
+      ? raw.llm as Record<string, unknown>
+      : {};
+    return c.json({
+      service: typeof llm.service === "string" ? llm.service : null,
+      defaultModel: typeof llm.defaultModel === "string" && llm.defaultModel.trim()
+        ? llm.defaultModel
+        : typeof llm.model === "string" && llm.model.trim()
+          ? llm.model
+          : null,
+    });
+  });
+
+  app.put("/api/v1/project/default-model", async (c) => {
+    const body = await c.req.json<{ defaultModel?: string; service?: string }>();
+    const defaultModel = typeof body.defaultModel === "string" ? body.defaultModel.trim() : "";
+    if (!defaultModel) return c.json({ error: "defaultModel is required" }, 400);
+    const raw = await loadRawConfig(root);
+    raw.llm = raw.llm && typeof raw.llm === "object" && !Array.isArray(raw.llm) ? raw.llm : {};
+    const llm = raw.llm as Record<string, unknown>;
+    llm.defaultModel = defaultModel;
+    if (typeof body.service === "string" && body.service.trim()) {
+      llm.service = body.service.trim();
+    }
+    syncTopLevelLlmMirror(llm);
+    await saveRawConfig(root, raw);
+    return c.json({
+      ok: true,
+      service: typeof llm.service === "string" ? llm.service : null,
+      defaultModel,
+    });
+  });
+
+  // --- Chapter review mode (C4a: auto pipeline vs manual checkpoint) ---
+
+  app.get("/api/v1/project/chapter-review-mode", async (c) => {
+    const raw = await loadRawConfig(root);
+    return c.json({ mode: readProjectChapterReviewMode(raw) });
+  });
+
+  app.put("/api/v1/project/chapter-review-mode", async (c) => {
+    const { mode } = await c.req.json<{ mode?: string }>();
+    const next = normalizeChapterReviewMode(mode);
+    const raw = await loadRawConfig(root);
+    raw.writing = { ...(raw.writing ?? {}), reviewMode: next };
+    await saveRawConfig(root, raw);
+    return c.json({ ok: true, mode: next });
+  });
+
+  app.get("/api/v1/books/:id/chapter-review-mode", async (c) => {
+    const bookId = c.req.param("id");
+    if (!isSafeBookId(bookId)) return c.json({ error: "Invalid book id" }, 400);
+    try {
+      const [projectConfig, rawBook] = await Promise.all([
+        loadRawConfig(root),
+        loadRawBookConfig(root, bookId),
+      ]);
+      const projectMode = readProjectChapterReviewMode(projectConfig);
+      const bookMode = readBookChapterReviewMode(rawBook);
+      return c.json({
+        mode: bookMode ?? projectMode,
+        bookMode: bookMode ?? null,
+        projectMode,
+      });
+    } catch {
+      return c.json({ error: `Book "${bookId}" not found` }, 404);
+    }
+  });
+
+  app.put("/api/v1/books/:id/chapter-review-mode", async (c) => {
+    const bookId = c.req.param("id");
+    if (!isSafeBookId(bookId)) return c.json({ error: "Invalid book id" }, 400);
+    const { mode } = await c.req.json<{ mode?: string }>();
+    const rawBookPath = join(root, "books", bookId, "book.json");
+    try {
+      const [projectConfig, rawBook] = await Promise.all([
+        loadRawConfig(root),
+        loadRawBookConfig(root, bookId),
+      ]);
+      const projectMode = readProjectChapterReviewMode(projectConfig);
+      if (mode === "inherit") {
+        const writing = rawBook.writing && typeof rawBook.writing === "object" && !Array.isArray(rawBook.writing)
+          ? { ...(rawBook.writing as Record<string, unknown>) }
+          : {};
+        delete writing.reviewMode;
+        rawBook.writing = Object.keys(writing).length > 0 ? writing : undefined;
+      } else {
+        rawBook.writing = {
+          ...(rawBook.writing && typeof rawBook.writing === "object" && !Array.isArray(rawBook.writing) ? rawBook.writing as Record<string, unknown> : {}),
+          reviewMode: normalizeChapterReviewMode(mode),
+        };
+      }
+      await writeFile(rawBookPath, JSON.stringify(rawBook, null, 2), "utf-8");
+      const bookMode = readBookChapterReviewMode(rawBook);
+      return c.json({
+        ok: true,
+        mode: bookMode ?? projectMode,
+        bookMode: bookMode ?? null,
+        projectMode,
+      });
+    } catch {
+      return c.json({ error: `Book "${bookId}" not found` }, 404);
+    }
   });
 
   // --- Notify channels ---

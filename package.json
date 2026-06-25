@@ -4,13 +4,16 @@
   "private": true,
   "description": "YANGYANG 小说 Agent — secondary development of InkOS for a cloud Studio novel writing agent",
   "keywords": [
+    "story-creation-ai-agent",
+    "story-agent",
     "ai-novel-writing",
     "ai-writing-agent",
     "novel-generator",
-    "autonomous-writing",
+    "interactive-fiction",
+    "ip-content",
+    "ai-storytelling",
     "litrpg",
     "progression-fantasy",
-    "multi-agent",
     "creative-writing-ai",
     "openclaw-skill",
     "cli"

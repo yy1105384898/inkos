@@ -81,6 +81,9 @@ export const BookConfigSchema = z.object({
   parentBookId: z.string().optional(),
   fanficMode: FanficModeSchema.optional(),
   writingQuality: WritingQualityProfileSchema.optional(),
+  writing: z.object({
+    reviewMode: z.enum(["auto", "manual"]).optional(),
+  }).optional(),
 });
 
 export type BookConfig = z.infer<typeof BookConfigSchema>;
