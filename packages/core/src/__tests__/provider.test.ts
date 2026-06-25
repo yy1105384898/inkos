@@ -433,6 +433,35 @@ describe("chatCompletion via pi-ai", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses native fetch transport for yysubapi chat", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "sub ok" } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "yysubapi",
+      stream: false,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://yysubapi.yangyangnj.top/v1",
+      },
+    });
+    const result = await chatCompletion(client, "gpt-5.4", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("sub ok");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+    expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
   it("does not leave a stream monitor timer after native non-stream chat", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue({

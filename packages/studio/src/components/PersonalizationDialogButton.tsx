@@ -83,8 +83,8 @@ export function PersonalizationDialogButton({
         }}
         className={resolvedClassName}
       >
-        <Brain size={iconSize} className={resolvedIconClassName} />
-        <span>{label}</span>
+        <Brain size={iconSize} className={`shrink-0 ${resolvedIconClassName ?? ""}`} />
+        <span className="min-w-0 truncate text-left">{label}</span>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-lg">
