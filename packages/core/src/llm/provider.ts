@@ -29,7 +29,7 @@ export type OnStreamProgress = (progress: StreamProgress) => void;
 
 const INKOS_USER_AGENT = "InkOS/1.3.5";
 const UNKNOWN_MODEL_FALLBACK_MAX_TOKENS = 8192 * 3;
-const TRANSIENT_LLM_RETRIES = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRIES", 6);
+export const TRANSIENT_LLM_RETRIES = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRIES", 6);
 const TRANSIENT_LLM_RETRY_BASE_DELAY_MS = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRY_BASE_DELAY_MS", 1_500);
 const TRANSIENT_LLM_RETRY_MAX_DELAY_MS = readPositiveIntEnv("INKOS_LLM_TRANSIENT_RETRY_MAX_DELAY_MS", 12_000);
 
@@ -273,6 +273,13 @@ export class PartialResponseError extends Error {
   }
 }
 
+class EmptyStreamResponseError extends Error {
+  constructor(message = "LLM returned empty response from stream") {
+    super(message);
+    this.name = "EmptyStreamResponseError";
+  }
+}
+
 export class ContextWindowExceededError extends Error {
   readonly estimatedInputTokens: number;
   readonly reservedOutputTokens: number;
@@ -439,6 +446,7 @@ export function assertWithinContextWindow(params: {
 // === Error Wrapping ===
 
 function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; readonly model?: string; readonly service?: string }): Error {
+  if (error instanceof EmptyStreamResponseError) return error;
   const msg = String(error);
   const ctxLine = context
     ? `\n  (baseUrl: ${context.baseUrl}, model: ${context.model})`
@@ -936,7 +944,7 @@ async function chatCompletionViaCustomAnthropicCompatible(
   }
 
   if (!content) {
-    throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
+    throw new EmptyStreamResponseError();
   }
   if (!sawMessageStop) {
     // Anthropic 协议的正常结束必须有 message_stop；没有就是流被中途掐断
@@ -1045,7 +1053,7 @@ async function chatCompletionViaCustomOpenAICompatible(
     }
 
     if (!content) {
-      throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
+      throw new EmptyStreamResponseError();
     }
     if (!sawResponseTerminal) {
       // Responses 协议的正常结束必须有 response.completed/incomplete 终止事件
@@ -1164,7 +1172,7 @@ async function chatCompletionViaCustomOpenAICompatible(
 
   const finalContent = content || reasoningContent;
   if (!finalContent) {
-    throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
+    throw new EmptyStreamResponseError();
   }
   if (!sawTerminal) {
     throw new PartialResponseError(finalContent, new Error("stream closed without [DONE]/finish_reason"));
@@ -1202,26 +1210,36 @@ export async function chatCompletion(
   const onStreamProgress = options?.onStreamProgress;
   const onTextDelta = options?.onTextDelta;
   const errorCtx = { baseUrl: client._piModel?.baseUrl ?? "(unknown)", model, service: client.service };
+  const runOnce = (activeClient: LLMClient): Promise<LLMResponse> => withTransientLLMRetry(
+    async () => {
+      assertWithinContextWindow({
+        piModel: resolvePiModel(activeClient, model),
+        model,
+        estimatedInputTokens: estimateLLMMessagesTokens(messages),
+        reservedOutputTokens: resolved.maxTokens,
+      });
+      if (shouldUseNativeCustomTransport(activeClient)) {
+        return chatCompletionViaCustomOpenAICompatible(activeClient, model, messages, resolved, onStreamProgress, onTextDelta);
+      }
+      return chatCompletionViaPiAi(activeClient, model, messages, resolved, onStreamProgress, onTextDelta);
+    },
+    // Retrying after UI text deltas have been emitted can duplicate visible
+    // text; callers can also opt out (e.g. fast-fail diagnostics).
+    { enabled: (options?.retry ?? true) && !onTextDelta },
+  );
 
   try {
-    return await withTransientLLMRetry(
-      async () => {
-        assertWithinContextWindow({
-          piModel: resolvePiModel(client, model),
-          model,
-          estimatedInputTokens: estimateLLMMessagesTokens(messages),
-          reservedOutputTokens: resolved.maxTokens,
-        });
-        if (shouldUseNativeCustomTransport(client)) {
-          return chatCompletionViaCustomOpenAICompatible(client, model, messages, resolved, onStreamProgress, onTextDelta);
-        }
-        return chatCompletionViaPiAi(client, model, messages, resolved, onStreamProgress, onTextDelta);
-      },
-      // Retrying after UI text deltas have been emitted can duplicate visible
-      // text; callers can also opt out (e.g. fast-fail diagnostics).
-      { enabled: (options?.retry ?? true) && !onTextDelta },
-    );
+    return await runOnce(client);
   } catch (error) {
+    if (client.stream && error instanceof EmptyStreamResponseError) {
+      console.warn(`[inkos] 模型 "${model}" 流式响应为空，自动切换为非流式重试一次`);
+      try {
+        return await runOnce({ ...client, stream: false });
+      } catch (fallbackError) {
+        const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        throw new Error(`${error.message}; non-stream fallback failed: ${fallbackMessage}`);
+      }
+    }
     // 注意：中断的流（PartialResponseError）不再"打捞"半截内容当成功返回——
     // 那会产出写到一半就结束的章节/设定文件。重试由 withTransientLLMRetry
     // 负责（完整重新生成）；重试耗尽后如实抛错。
@@ -1356,7 +1374,7 @@ async function chatCompletionViaPiAi(
   if (!content) {
     const diag = `usage=${inputTokens}+${outputTokens}`;
     console.warn(`[inkos] LLM 流式响应无文本内容 (${diag})`);
-    throw new Error(`LLM returned empty response from stream (${diag})`);
+    throw new EmptyStreamResponseError(`LLM returned empty response from stream (${diag})`);
   }
   if (!sawDone) {
     // 事件流没有以 done 收尾就结束 = 上游把流掐断了，内容不可信

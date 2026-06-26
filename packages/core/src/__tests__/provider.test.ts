@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantMessage, Model, Api } from "@mariozechner/pi-ai";
 import {
+  TRANSIENT_LLM_RETRIES,
   __resetFixedTemperatureWarnings,
   chatCompletion,
   type LLMClient,
@@ -458,6 +459,49 @@ describe("chatCompletion via pi-ai", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(mockCompleteSimple).not.toHaveBeenCalled();
     expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to non-stream chat when native stream returns no text", async () => {
+    const encoder = new TextEncoder();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "fallback ok" } }],
+          usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "yynewapi",
+      stream: true,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://yynewapi.yangyangnj.top/v1",
+      },
+    });
+    const result = await chatCompletion(client, "gpt-5.4", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("fallback ok");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstPayload = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body);
+    const secondPayload = JSON.parse((fetchMock.mock.calls[1]?.[1] as { body: string }).body);
+    expect(firstPayload.stream).toBe(true);
+    expect(secondPayload.stream).toBe(false);
 
     vi.unstubAllGlobals();
   });
@@ -1086,8 +1130,7 @@ describe("stream interruption detection", () => {
 
     await expect(chatCompletion(nativeStreamClient(), "glm-compat", [{ role: "user", content: "写第1章" }]))
       .rejects.toThrow(/Stream interrupted|completion signal/);
-    // 初次 + TRANSIENT_LLM_RETRIES(2) 次重试
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1 + TRANSIENT_LLM_RETRIES);
     vi.unstubAllGlobals();
   });
 
