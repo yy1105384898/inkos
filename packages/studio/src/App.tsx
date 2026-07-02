@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useHashRoute } from "./hooks/use-hash-route";
 import type { HashRoute } from "./hooks/use-hash-route";
 import { Sidebar } from "./components/Sidebar";
@@ -18,6 +18,10 @@ import { StyleManager } from "./pages/StyleManager";
 import { ImportManager } from "./pages/ImportManager";
 import { RadarView } from "./pages/RadarView";
 import { DoctorView } from "./pages/DoctorView";
+import { StoryPlayer } from "./pages/StoryPlayer";
+import { StoryGraphTree } from "./pages/StoryGraphTree";
+const FlowView = lazy(() => import("./pages/FlowView"));
+const FilmWizard = lazy(() => import("./pages/FilmWizard"));
 import { LanguageSelector } from "./pages/LanguageSelector";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminPanel } from "./pages/AdminPanel";
@@ -111,6 +115,11 @@ export function App() {
     toRadar: () => setRoute({ page: "radar" }),
     toDoctor: () => setRoute({ page: "doctor" }),
     toAdmin: () => setRoute({ page: "admin" }),
+    toPlay: (projectId: string) => setRoute({ page: "play", projectId }),
+    toFilm: (projectId: string) => setRoute({ page: "film", projectId }),
+    toFlow: (projectId: string) => setRoute({ page: "flow", projectId }),
+    toFilmAuthor: (projectId: string) => setRoute({ page: "film-author", projectId }),
+    toFilmStudio: (projectId: string) => setRoute({ page: "film-studio", projectId }),
   };
 
   const activeBookId = deriveActiveBookId(route);
@@ -370,6 +379,38 @@ export function App() {
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <AdminPanel currentUser={auth.user} />
             </div>
+          )}
+          {route.page === "play" && (
+            <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
+              <StoryPlayer projectId={route.projectId} nav={nav} theme={theme} t={t} />
+            </div>
+          )}
+          {route.page === "film" && (
+            <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
+              <StoryGraphTree projectId={route.projectId} nav={nav} theme={theme} t={t} />
+            </div>
+          )}
+          {route.page === "film-author" && (
+            <div className="absolute inset-0 flex min-w-0">
+              <ChatPage
+                activeBookId={route.projectId}
+                mode="interactive-film-authoring"
+                nav={nav}
+                theme={theme}
+                t={t}
+                sse={sse}
+              />
+            </div>
+          )}
+          {route.page === "film-studio" && (
+            <Suspense fallback={<div className="p-6 text-sm">加载创作向导…</div>}>
+              <FilmWizard projectId={route.projectId} nav={nav} theme={theme} t={t} sse={sse} />
+            </Suspense>
+          )}
+          {route.page === "flow" && (
+            <Suspense fallback={<div className="p-6 text-sm">加载流程图…</div>}>
+              <FlowView projectId={route.projectId} nav={nav} theme={theme} t={t} />
+            </Suspense>
           )}
         </main>
         {useMobileShell && <MobileBottomNav nav={nav} activePage={activePage} lang={currentLang} />}

@@ -2,7 +2,7 @@ import { memo, useRef, useEffect, useMemo, useState, useCallback } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
-import { fetchJson } from "../hooks/use-api";
+import { fetchJson, postApi, useApi } from "../hooks/use-api";
 import type { MessagePart } from "../store/chat/types";
 import { chatSelectors, useChatStore } from "../store/chat";
 import type { ChatSessionKind } from "../store/chat";
@@ -30,6 +30,8 @@ import {
   ArrowUp,
   ChevronDown,
   Check,
+  Plus,
+  X,
   Gamepad2,
   Palette,
   Square,
@@ -52,6 +54,14 @@ import {
   isChatScrollNearBottom,
   shouldShowPlayChoicePanel,
 } from "./chat-page-state";
+import {
+  createEmptySkillDraft,
+  selectedSkillIdsForSend,
+  skillDraftToPayload,
+  toggleSelectedSkillIds,
+  type SkillDraft,
+  type StudioSkill,
+} from "./skill-ui-state";
 
 // -- Types --
 
@@ -61,11 +71,13 @@ interface Nav {
   toServices: () => void;
   toImport: (tab?: "chapters" | "canon" | "fanfic" | "spinoff" | "imitation") => void;
   toStyle: () => void;
+  toFilm: (projectId: string) => void;
+  toFilmStudio: (projectId: string) => void;
 }
 
 export interface ChatPageProps {
   readonly activeBookId?: string;
-  readonly mode?: "book" | "book-create" | "project-chat";
+  readonly mode?: "book" | "book-create" | "project-chat" | "interactive-film-authoring";
   readonly nav: Nav;
   readonly theme: Theme;
   readonly t: TFunction;
@@ -91,6 +103,11 @@ interface CoverConfigResponse {
   readonly service?: string | null;
   readonly configured?: boolean;
   readonly providers?: ReadonlyArray<{ readonly service: string; readonly connected?: boolean }>;
+}
+
+interface SkillsResponse {
+  readonly skills: ReadonlyArray<StudioSkill>;
+  readonly diagnostics?: ReadonlyArray<{ readonly path?: string; readonly message?: string }>;
 }
 
 type ScrollFrameId = number | ReturnType<typeof setTimeout>;
@@ -190,6 +207,158 @@ const AssistantMessageParts = memo(function AssistantMessageParts({
   );
 });
 
+function SkillPickerPanel({
+  isZh,
+  skills,
+  selectedSkillIds,
+  loading,
+  error,
+  draft,
+  saving,
+  createError,
+  showCreate,
+  onToggleSkill,
+  onDraftChange,
+  onCreate,
+  onShowCreate,
+}: {
+  readonly isZh: boolean;
+  readonly skills: ReadonlyArray<StudioSkill>;
+  readonly selectedSkillIds: ReadonlyArray<string>;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly draft: SkillDraft;
+  readonly saving: boolean;
+  readonly createError: string | null;
+  readonly showCreate: boolean;
+  readonly onToggleSkill: (skillId: string) => void;
+  readonly onDraftChange: (draft: SkillDraft) => void;
+  readonly onCreate: () => void;
+  readonly onShowCreate: (show: boolean) => void;
+}) {
+  const selected = new Set(selectedSkillIds);
+  const canCreate = Boolean(skillDraftToPayload(draft).id && draft.body.trim());
+
+  return (
+    <div className="absolute bottom-[calc(100%+10px)] left-0 z-40 w-full overflow-hidden rounded-2xl border border-border/60 bg-card/95 shadow-2xl backdrop-blur">
+      <div className="border-b border-border/40 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-bold">{isZh ? "选择 Skill" : "Select skills"}</div>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {isZh ? "Skill 会随这条消息一起注入，让 Chat 主动使用专业能力。" : "Skills are injected into this turn so Chat can use focused expertise."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onShowCreate(!showCreate)}
+            className="shrink-0 rounded-lg border border-border/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+          >
+            {showCreate ? (isZh ? "收起" : "Close") : (isZh ? "+ 新建" : "+ New")}
+          </button>
+        </div>
+      </div>
+      <div className="max-h-[380px] overflow-y-auto p-3">
+        {loading ? (
+          <div className="px-2 py-6 text-center text-sm text-muted-foreground">{isZh ? "加载 Skill..." : "Loading skills..."}</div>
+        ) : error ? (
+          <div className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>
+        ) : skills.length === 0 ? (
+          <div className="px-2 py-6 text-center text-sm text-muted-foreground">{isZh ? "还没有可用 Skill。" : "No skills available yet."}</div>
+        ) : (
+          <div className="grid gap-2 md:grid-cols-2">
+            {skills.map((skill) => {
+              const checked = selected.has(skill.id);
+              return (
+                <button
+                  key={skill.id}
+                  type="button"
+                  onClick={() => onToggleSkill(skill.id)}
+                  className={`rounded-xl border p-3 text-left transition-all ${checked ? "border-primary/60 bg-primary/10" : "border-border/50 bg-secondary/20 hover:border-primary/30 hover:bg-secondary/35"}`}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-border text-transparent"}`}>
+                      <Check size={13} strokeWidth={3} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <div className="truncate text-sm font-semibold">{skill.name}</div>
+                        <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {skill.source ?? "skill"}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 font-mono text-[11px] text-muted-foreground/70">@{skill.id}</div>
+                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{skill.whenToUse || skill.description}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {showCreate ? (
+          <div className="mt-3 rounded-xl border border-border/50 bg-background/50 p-3">
+            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              {isZh ? "项目 Skill" : "Project skill"}
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <input
+                value={draft.id}
+                onChange={(event) => onDraftChange({ ...draft, id: event.target.value })}
+                placeholder="skill-id"
+                className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm outline-none focus:border-primary/50"
+              />
+              <input
+                value={draft.name}
+                onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
+                placeholder={isZh ? "Skill 名称" : "Skill name"}
+                className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm outline-none focus:border-primary/50"
+              />
+              <input
+                value={draft.whenToUse}
+                onChange={(event) => onDraftChange({ ...draft, whenToUse: event.target.value })}
+                placeholder={isZh ? "什么时候使用" : "When to use"}
+                className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm outline-none focus:border-primary/50 md:col-span-2"
+              />
+              <input
+                value={draft.triggers}
+                onChange={(event) => onDraftChange({ ...draft, triggers: event.target.value })}
+                placeholder={isZh ? "触发词，用逗号分隔" : "Triggers, comma separated"}
+                className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm outline-none focus:border-primary/50"
+              />
+              <input
+                value={draft.sessionKinds}
+                onChange={(event) => onDraftChange({ ...draft, sessionKinds: event.target.value })}
+                placeholder="chat,book,short,play"
+                className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm outline-none focus:border-primary/50"
+              />
+              <textarea
+                value={draft.body}
+                onChange={(event) => onDraftChange({ ...draft, body: event.target.value })}
+                placeholder={isZh ? "写给模型的专业能力说明..." : "Instructions for the model..."}
+                rows={4}
+                className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm leading-6 outline-none focus:border-primary/50 md:col-span-2"
+              />
+            </div>
+            {createError ? <p className="mt-2 text-xs text-destructive">{createError}</p> : null}
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={onCreate}
+                disabled={!canCreate || saving}
+                className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground transition-opacity disabled:opacity-40"
+              >
+                {saving ? (isZh ? "保存中..." : "Saving...") : (isZh ? "保存并启用" : "Save and enable")}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 // -- Component --
 
 export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-create", nav, theme, t, sse: _sse }: ChatPageProps) {
@@ -221,7 +390,9 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const isZh = t("nav.connected") === "\u5DF2\u8FDE\u63A5";
   const hasBook = Boolean(activeBookId);
   const currentSessionKind: ChatSessionKind = activeSession?.sessionKind
-    ?? (mode === "book-create" ? "book-create" : activeBookId ? "book" : "chat");
+    ?? (mode === "interactive-film-authoring" ? "interactive-film-authoring"
+      : mode === "book-create" ? "book-create"
+      : activeBookId ? "book" : "chat");
   const playMode = activeSession?.playMode;
   // A play session must pick its playstyle (点着玩 / 自由玩) before chatting.
   const needsPlayModeChoice = currentSessionKind === "play" && !playMode;
@@ -247,7 +418,21 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const [playImageMenuOpen, setPlayImageMenuOpen] = useState(false);
   const [playImageSettings, setPlayImageSettings] = useState<PlayImageSettings>({ actors: false, moments: false, inventory: false });
   const [playImageCoverReady, setPlayImageCoverReady] = useState(false);
+  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [skillDraft, setSkillDraft] = useState<SkillDraft>(() => createEmptySkillDraft());
+  const [skillSaving, setSkillSaving] = useState(false);
+  const [skillCreateError, setSkillCreateError] = useState<string | null>(null);
+  const [showSkillCreate, setShowSkillCreate] = useState(false);
+  const { data: skillsData, loading: skillsLoading, error: skillsError, refetch: refetchSkills } = useApi<SkillsResponse>("/skills");
   const worldPanelInsetClass = currentSessionKind === "play" && worldPanelOpen ? "lg:pr-[380px]" : "";
+  const availableSkills = skillsData?.skills ?? [];
+  const selectedSkills = useMemo(
+    () => selectedSkillIds
+      .map((id) => availableSkills.find((skill) => skill.id === id))
+      .filter((skill): skill is StudioSkill => Boolean(skill)),
+    [availableSkills, selectedSkillIds],
+  );
 
   // Derived: is the assistant currently streaming/thinking/executing tools?
   const isStreaming = useMemo(() => {
@@ -412,7 +597,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
           return;
         }
 
-        await createSession(activeBookId, "book");
+        await createSession(activeBookId, mode === "interactive-film-authoring" ? "interactive-film-authoring" : "book");
         return;
       }
 
@@ -461,12 +646,37 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
 
   const onSend = (text: string) => {
     if (!activeSessionId) return;
+    if (!text.trim()) return;
+    const requestedSkills = selectedSkillIdsForSend(selectedSkillIds);
     autoScrollPinnedRef.current = true;
     void sendMessage(activeSessionId, text, {
       activeBookId,
       sessionKind: currentSessionKind,
       actionSource: "free-text",
+      requestedSkills,
     });
+    if (requestedSkills?.length) {
+      setSelectedSkillIds([]);
+      setSkillPanelOpen(false);
+    }
+  };
+
+  const createProjectSkill = async () => {
+    const payload = skillDraftToPayload(skillDraft);
+    if (!payload.id || !skillDraft.body.trim()) return;
+    setSkillSaving(true);
+    setSkillCreateError(null);
+    try {
+      await postApi("/skills", payload);
+      await refetchSkills();
+      setSelectedSkillIds((prev) => prev.includes(payload.id!) ? prev : [...prev, payload.id!]);
+      setSkillDraft(createEmptySkillDraft());
+      setShowSkillCreate(false);
+    } catch (error) {
+      setSkillCreateError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSkillSaving(false);
+    }
   };
 
   const handleQuickAction = (command: string, requestedIntent?: "write_next") => {
@@ -653,13 +863,69 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                   <ChatMessage role="user" content={msg.content} timestamp={msg.timestamp} theme={theme} />
                 ) : msg.parts && msg.parts.length > 0 ? (
                   /* Assistant message — parts-based rendering (chronological) */
-                  <AssistantMessageParts
-                    parts={msg.parts}
-                    timestamp={msg.timestamp}
-                    theme={theme}
-                    onProposedAction={handleProposedAction}
-                    onRejectProposedAction={handleRejectProposedAction}
-                  />
+                  /* Merge consecutive utility tool parts into one group */
+                  <>
+                    {(() => {
+                      type RenderItem =
+                        | { kind: "thinking"; pi: number; part: Extract<typeof msg.parts[0], { type: "thinking" }> }
+                        | { kind: "text"; pi: number; part: Extract<typeof msg.parts[0], { type: "text" }> }
+                        | { kind: "tools"; parts: Array<Extract<typeof msg.parts[0], { type: "tool" }>>; startIdx: number };
+
+                      const items: RenderItem[] = [];
+                      for (let pi = 0; pi < msg.parts!.length; pi++) {
+                        const part = msg.parts![pi];
+                        if (part.type === "thinking") {
+                          items.push({ kind: "thinking", pi, part });
+                        } else if (part.type === "text") {
+                          items.push({ kind: "text", pi, part });
+                        } else if (part.type === "tool") {
+                          // Merge consecutive tool parts into one group
+                          const last = items[items.length - 1];
+                          if (last?.kind === "tools") {
+                            last.parts.push(part);
+                          } else {
+                            items.push({ kind: "tools", parts: [part], startIdx: pi });
+                          }
+                        }
+                      }
+
+                      return items.map((item) => {
+                        if (item.kind === "thinking") {
+                          return (
+                            <div key={`t-${item.pi}`} className="mb-2">
+                              <Reasoning isStreaming={item.part.streaming}>
+                                <ReasoningTrigger />
+                                <ReasoningContent>{item.part.content}</ReasoningContent>
+                              </Reasoning>
+                            </div>
+                          );
+                        }
+                        if (item.kind === "tools") {
+                          return (
+                            <ToolExecutionSteps
+                              key={`x-${item.startIdx}`}
+                              executions={item.parts.map(p => p.execution)}
+                              onProposedAction={handleProposedAction}
+                              onRejectProposedAction={handleRejectProposedAction}
+                              onOpenFilmStudio={nav.toFilmStudio}
+                            />
+                          );
+                        }
+                        if (item.kind === "text" && item.part.content) {
+                          return (
+                            <ChatMessage
+                              key={`c-${item.pi}`}
+                              role="assistant"
+                              content={item.part.content}
+                              timestamp={msg.timestamp}
+                              theme={theme}
+                            />
+                          );
+                        }
+                        return null;
+                      });
+                    })()}
+                  </>
                 ) : (
                   /* Assistant message — fallback (no parts, e.g. error messages) */
                   <ChatMessage
@@ -722,8 +988,58 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       <div className={`shrink-0 border-t border-border/40 px-4 py-3 transition-[padding] duration-200 ${worldPanelInsetClass}`}>
         <div className="max-w-3xl mx-auto">
           <div className="flex items-start gap-2">
-            <div className="flex-1 rounded-xl bg-secondary/30 transition-all">
+            <div className="relative flex-1 rounded-xl bg-secondary/30 transition-all">
+              {skillPanelOpen ? (
+                <SkillPickerPanel
+                  isZh={isZh}
+                  skills={availableSkills}
+                  selectedSkillIds={selectedSkillIds}
+                  loading={skillsLoading}
+                  error={skillsError}
+                  draft={skillDraft}
+                  saving={skillSaving}
+                  createError={skillCreateError}
+                  showCreate={showSkillCreate}
+                  onToggleSkill={(skillId) => setSelectedSkillIds((prev) => toggleSelectedSkillIds(prev, skillId))}
+                  onDraftChange={setSkillDraft}
+                  onCreate={() => void createProjectSkill()}
+                  onShowCreate={(show) => {
+                    setShowSkillCreate(show);
+                    setSkillCreateError(null);
+                  }}
+                />
+              ) : null}
+              {selectedSkills.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5 border-b border-border/20 px-3 py-2">
+                  {selectedSkills.map((skill) => (
+                    <span
+                      key={skill.id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                    >
+                      {skill.name}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSkillIds((prev) => prev.filter((id) => id !== skill.id))}
+                        className="rounded-full p-0.5 hover:bg-primary/20"
+                        aria-label={isZh ? `移除 ${skill.name}` : `Remove ${skill.name}`}
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <div className="flex items-center gap-2 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => setSkillPanelOpen((value) => !value)}
+                  disabled={loading || !activeSessionId}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/50 transition-colors disabled:opacity-30 ${skillPanelOpen || selectedSkillIds.length > 0 ? "bg-primary/10 text-primary" : "text-muted-foreground hover:border-primary/40 hover:text-primary"}`}
+                  title={isZh ? "添加 Skill" : "Add skill"}
+                  aria-label={isZh ? "添加 Skill" : "Add skill"}
+                >
+                  <Plus size={16} strokeWidth={2.4} />
+                </button>
                 <textarea
                   ref={textareaRef}
                   value={input}

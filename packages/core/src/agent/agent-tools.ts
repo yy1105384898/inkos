@@ -5,7 +5,7 @@ import { ArchitectIncompleteFoundationError } from "../agents/architect.js";
 import { type ReviseMode } from "../agents/reviser.js";
 import { defaultChapterLength } from "../utils/length-metrics.js";
 import { inferLanguage } from "../utils/language.js";
-import { readFile, writeFile, readdir, rename, stat } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, rename, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { StateManager } from "../state/manager.js";
 import { assertSafeTruthFileName, createInteractionToolsFromDeps } from "../interaction/project-tools.js";
@@ -15,12 +15,15 @@ import { safeChildPath } from "../utils/path-safety.js";
 import { normalizePlatformId, normalizePlatformOrOther } from "../models/book.js";
 import { generateShortFictionCover, runShortFictionProduction } from "../pipeline/short-fiction-runner.js";
 import { runInteractiveFilmCreation, runScriptCreation, runStoryboardCreation } from "../pipeline/script-storyboard-runner.js";
+import { runResearchReport } from "../agents/researcher.js";
 import type { ScriptTargetFormat } from "../agents/script-storyboard.js";
 import { createPlayDB, type PlayGraphDB } from "../play/play-db-factory.js";
 import { PlayRunner, type PlayOpeningSeedResult, type PlayReplayResult, type PlayStepResult, type PlayVariantRestoreResult } from "../play/play-runner.js";
 import { PlayStore } from "../play/play-store.js";
 import type { AgentContext } from "../agents/base.js";
 import { ActionPayloadSchema, isUsablePlayInitialScene, type ActionPayload } from "../interaction/action-envelope.js";
+import { ResearchSearchConfigSchema } from "../models/project.js";
+import { searchWeb } from "../utils/web-search.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,6 +120,9 @@ const ProposeActionParams = Type.Object({
     Type.Literal("script_create"),
     Type.Literal("storyboard_create"),
     Type.Literal("interactive_film_create"),
+    Type.Literal("draft_structure"),
+    Type.Literal("connect_choice"),
+    Type.Literal("remove_node"),
   ], {
     description: "The production or assisted Studio workflow the user appears to want, but which needs explicit confirmation from general chat.",
   }),
@@ -253,12 +259,13 @@ type ProposeActionToolOptions = {
   readonly sameSession?: boolean;
 };
 
-function proposedActionSessionKind(action: ProposeActionParamsType["action"]): "book-create" | "short" | "play" | "script" | "storyboard" | "interactive-film" | "chat" {
+function proposedActionSessionKind(action: ProposeActionParamsType["action"]): "book-create" | "short" | "play" | "script" | "storyboard" | "interactive-film" | "interactive-film-authoring" | "chat" {
   if (action === "create_book") return "book-create";
   if (action === "play_start") return "play";
   if (action === "script_create") return "script";
   if (action === "storyboard_create") return "storyboard";
   if (action === "interactive_film_create") return "interactive-film";
+  if (action === "draft_structure" || action === "connect_choice" || action === "remove_node") return "interactive-film-authoring";
   if (action === "fanfic_init" || action === "continuation_import" || action === "spinoff_create" || action === "style_imitation") return "chat";
   return "short";
 }
@@ -295,6 +302,12 @@ function proposedActionFallbackTitle(action: ProposeActionParamsType["action"], 
       return isZh ? "创建分镜" : "Create storyboard";
     case "interactive_film_create":
       return isZh ? "创建互动影游" : "Create interactive film";
+    case "draft_structure":
+      return isZh ? "生成故事结构" : "Draft story structure";
+    case "connect_choice":
+      return isZh ? "连接选项" : "Connect choice";
+    case "remove_node":
+      return isZh ? "删除节点" : "Remove node";
   }
 }
 
@@ -322,6 +335,10 @@ function compactObject<T extends Record<string, unknown>>(value: T | undefined):
       const items = raw.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         .map((item) => item.trim());
       if (items.length > 0) out[key] = items;
+      continue;
+    }
+    if (typeof raw === "number") {
+      if (Number.isFinite(raw) && raw > 0) out[key] = raw;
       continue;
     }
     if (raw !== undefined && raw !== null) {
@@ -776,7 +793,112 @@ export function createSubAgentTool(
 }
 
 // ---------------------------------------------------------------------------
-// 2. Standalone Short Fiction Tool
+// 2. Research Tool (research_web)
+// ---------------------------------------------------------------------------
+
+const ResearchWebParams = Type.Object({
+  topic: Type.String({
+    description: "Research question or topic, e.g. 1990s county cold-storage accounting workflow or Tang dynasty courier stations.",
+  }),
+  purpose: Type.Union([
+    Type.Literal("worldbuilding"),
+    Type.Literal("era"),
+    Type.Literal("profession"),
+    Type.Literal("market"),
+    Type.Literal("fact-check"),
+    Type.Literal("general"),
+  ], {
+    description: "Why this research is needed. Research reports are references only and must not directly mutate story state.",
+  }),
+  depth: Type.Optional(Type.Union([
+    Type.Literal("quick"),
+    Type.Literal("standard"),
+    Type.Literal("deep"),
+  ], {
+    description: "Research depth. Default standard.",
+  })),
+});
+
+type ResearchWebParamsType = Static<typeof ResearchWebParams>;
+
+export function createResearchWebTool(projectRoot: string): AgentTool<typeof ResearchWebParams> {
+  return {
+    name: "research_web",
+    description:
+      "Collect traceable web research for worldbuilding, era, profession, market, or fact-check questions. " +
+      "Saves a Markdown report under .inkos/research/. It is reference material only; it must not modify books, chapters, or truth files.",
+    label: "Research Web",
+    parameters: ResearchWebParams,
+    async execute(
+      _toolCallId: string,
+      params: ResearchWebParamsType,
+      _signal?: AbortSignal,
+      onUpdate?: AgentToolUpdateCallback,
+    ): Promise<AgentToolResult<unknown>> {
+      onUpdate?.(textResult(`Researching: ${params.topic}`));
+      const searchConfig = await readResearchSearchConfig(projectRoot);
+      const searchOptions = searchConfig.enabled
+        ? {
+            apiKey: searchConfig.apiKey,
+            apiKeyEnv: searchConfig.apiKeyEnv,
+            baseUrl: searchConfig.baseUrl,
+          }
+        : {};
+      const report = await runResearchReport({
+        topic: params.topic,
+        purpose: params.purpose,
+        depth: params.depth ?? "standard",
+      }, {
+        search: (query, maxResults) => searchWeb(query, maxResults, searchOptions),
+      });
+      const reportDir = join(projectRoot, ".inkos", "research");
+      await mkdir(reportDir, { recursive: true });
+      const fileName = `${new Date().toISOString().replace(/[:.]/g, "-")}-${slugResearchTopic(params.topic)}.md`;
+      const reportPath = join(reportDir, fileName);
+      await writeFile(reportPath, report.markdown, "utf-8");
+      return textResult(
+        [
+          `Research report saved: ${reportPath}`,
+          `Sources: ${report.sources.length}; confidence: ${report.confidence}.`,
+          report.partialFailures.length > 0 ? `Partial failures: ${report.partialFailures.length}.` : "Partial failures: none.",
+        ].join("\n"),
+        {
+          kind: "research_report",
+          reportPath,
+          topic: params.topic,
+          purpose: params.purpose,
+          depth: params.depth ?? "standard",
+          sources: report.sources,
+          claims: report.claims,
+          confidence: report.confidence,
+          partialFailures: report.partialFailures,
+        },
+      );
+    },
+  };
+}
+
+function slugResearchTopic(topic: string): string {
+  const slug = topic
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return slug || "research";
+}
+
+async function readResearchSearchConfig(projectRoot: string) {
+  try {
+    const raw = JSON.parse(await readFile(join(projectRoot, "inkos.json"), "utf-8")) as Record<string, unknown>;
+    return ResearchSearchConfigSchema.parse(raw.researchSearch ?? {});
+  } catch {
+    return ResearchSearchConfigSchema.parse({});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Standalone Short Fiction Tool
 // ---------------------------------------------------------------------------
 
 const ShortFictionRunParams = Type.Object({
@@ -1171,6 +1293,7 @@ export function createInteractiveFilmCreationTool(
         [
           `Interactive film "${result.projectId}" completed.`,
           `Spec: ${result.specPath}`,
+          `Story graph: ${result.storyGraphPath}`,
           `Story tree: ${result.storyTreePath}`,
           `Flags: ${result.flagsPath}`,
           `Script: ${result.scriptPath}`,

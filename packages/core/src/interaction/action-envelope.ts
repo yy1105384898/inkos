@@ -1,8 +1,14 @@
 import { z } from "zod";
 import { PlayModeSchema, type PlayMode } from "./session.js";
+import { StoryNodeSchema } from "../interactive-film/graph-schema.js";
 
 export const ActionSourceSchema = z.enum(["free-text", "button", "slash", "quick-action"]);
 export type ActionSource = z.infer<typeof ActionSourceSchema>;
+
+export const SkillIdSchema = z.string()
+  .trim()
+  .min(1)
+  .regex(/^[a-z][a-z0-9-]*$/i, "Skill id must use letters, numbers, and hyphens.");
 
 export const RequestedIntentSchema = z.enum([
   "create_book",
@@ -19,6 +25,9 @@ export const RequestedIntentSchema = z.enum([
   "script_create",
   "storyboard_create",
   "interactive_film_create",
+  "draft_structure",
+  "connect_choice",
+  "remove_node",
 ]);
 export type RequestedIntent = z.infer<typeof RequestedIntentSchema>;
 
@@ -116,9 +125,35 @@ export const ActionPayloadSchema = z.object({
   scriptCreate: ScriptCreateActionPayloadSchema.optional(),
   storyboardCreate: StoryboardCreateActionPayloadSchema.optional(),
   interactiveFilmCreate: InteractiveFilmCreateActionPayloadSchema.optional(),
+  draftStructure: z.object({
+    projectId: z.string().min(1).optional(),
+    instruction: z.string().default(""),
+  }).optional(),
+  connectChoice: z.object({
+    projectId: z.string().min(1).optional(),
+    node: StoryNodeSchema,
+  }).optional(),
+  removeNode: z.object({
+    projectId: z.string().min(1).optional(),
+    nodeId: z.string().min(1),
+  }).optional(),
 }).strict();
 
 export type ActionPayload = z.infer<typeof ActionPayloadSchema>;
+
+export function normalizeSkillIdList(value: unknown): string[] {
+  if (value === undefined || value === null || value === "") return [];
+  const values = Array.isArray(value) ? value : [value];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of values) {
+    const parsed = SkillIdSchema.parse(item).toLowerCase();
+    if (seen.has(parsed)) continue;
+    seen.add(parsed);
+    out.push(parsed);
+  }
+  return out;
+}
 
 export function normalizeActionSource(value: unknown): ActionSource {
   if (value === undefined || value === null || value === "") return "free-text";

@@ -1,11 +1,13 @@
 import type { SessionKind } from "../interaction/session.js";
 import type { ActionSource, RequestedIntent } from "../interaction/action-envelope.js";
+import type { SkillResolutionResult } from "../skills/index.js";
 
 export interface AgentSystemPromptOptions {
   readonly actionSource?: ActionSource;
   readonly requestedIntent?: RequestedIntent;
   readonly playWorldExists?: boolean;
   readonly personalizationMemory?: string;
+  readonly skills?: SkillResolutionResult;
 }
 
 function isConfirmedAction(
@@ -36,30 +38,82 @@ function buildChatPrompt(isZh: boolean): string {
 
 这里不是自动生产入口。用户讨论、提问、比较方案时，直接回答。
 
-可用工具：propose_action。用户明确要创建长篇、生成短篇、启动互动世界、生成封面、创建剧本、创建分镜，或打开同人/续写/番外/仿写辅助入口时调用它。
+可用工具：propose_action、research_web。用户明确要创建长篇、生成短篇、启动互动世界、生成封面、创建剧本、创建分镜，或打开同人/续写/番外/仿写辅助入口时调用 propose_action。用户明确要求联网研究、事实核查、年代/职业/世界观资料时调用 research_web；研究报告只是参考材料，不会自动改设定或正文。
 
 生产型动作：create_book、short_run、play_start、generate_cover、script_create、storyboard_create、interactive_film_create。确认后会切换到对应 session 执行。
 辅助入口动作：fanfic_init、continuation_import、spinoff_create、style_imitation。确认后只打开现有 Studio 工具，不能声称已经生成成品。
 辅助入口是“打开工具并准备材料”，不是立即生成成品。用户明确提到“同人 / 续写 / 番外 / 仿写 / 文风分析 / 参考文风 / 模仿笔法 / 先分析再仿写”时，必须调用 propose_action，不要用普通文字追问书名、原文、父书路径或解释流程。材料缺失时从用户方向临时概括一个短标题，instruction 里写清“待用户在入口补充材料”。映射：同人=fanfic_init，续写=continuation_import，番外/正典资料/不进入主线=spinoff_create，仿写/文风分析/参考文风/模仿笔法=style_imitation。确认卡标题/摘要必须说“打开入口 / 准备材料”，不要说“直接生成成品”。
 
 调用 propose_action 时，instruction 必须自包含：写清目标入口、标题/书名/路径、故事或视觉方向、用户提到的关键上下文；不要让下一条 session 依赖上一轮聊天上下文猜。能确定的执行参数必须同时填进结构化字段：createBook / shortRun / playStart / generateCover / scriptCreate / storyboardCreate / interactiveFilmCreate，不要只写在 instruction 文本里。互动世界如果用户说“开放世界/自由玩/自己行动”，playStart.mode 填 open；如果用户说“分支互动/点着玩/给选项”，playStart.mode 填 guided。互动影游/互动剧/影游交付/盛世天下式多结局剧本，使用 interactive_film_create，不要路由到 play_start。
-信息不足时只问一个关键问题。不要在 chat 里创建、写入、编辑或生成文件。
+信息不足时只问一个关键问题。不要在 chat 里创建、写入、编辑或生成故事/图片产物；research_web 保存的参考报告除外。
 
 ${commonOutputRules(true)}`
     : `You are the InkOS general chat assistant.
 
 This is not an automatic production surface. Answer questions, discussion, comparisons, and issue reports directly.
 
-Available tool: propose_action. Use it when the user clearly wants to create a book, run short fiction, start a play world, generate a cover, create a script, create a storyboard, or open assisted fanfiction / continuation / side-story / style-imitation workflows.
+Available tools: propose_action and research_web. Use propose_action when the user clearly wants to create a book, run short fiction, start a play world, generate a cover, create a script, create a storyboard, or open assisted fanfiction / continuation / side-story / style-imitation workflows. Use research_web when the user explicitly asks for web research, fact checking, era/profession/worldbuilding references, or market research; research reports are reference material only and do not automatically change canon or prose.
 
 Production actions: create_book, short_run, play_start, generate_cover, script_create, storyboard_create, interactive_film_create. After confirmation, InkOS switches to the matching session and runs them.
 Assisted workflow actions: fanfic_init, continuation_import, spinoff_create, style_imitation. After confirmation, InkOS only opens the existing Studio tool; do not claim finished content was generated.
 Assisted workflows open a tool and prepare materials; they do not immediately generate finished content. When the user explicitly asks for fanfiction, continuation, side-story/spinoff, style imitation, style analysis, reference-style analysis, prose mimicry, or "analyze first then imitate", you must call propose_action. Do not answer by asking for a title/source text/parent-book path or by explaining the workflow in plain text. If materials are missing, infer a short temporary title from the user's direction, and say in the instruction that the user will fill missing materials in the opened tool. Mapping: fanfiction=fanfic_init, continuation=continuation_import, side-story/spinoff/canon-materials=spinoff_create, style imitation/style analysis/reference-style/prose mimicry=style_imitation. The confirmation card title/summary must say "open workflow / prepare materials"; do not say finished content will be generated.
 
 When calling propose_action, instruction must be self-contained: include target surface, title/book/path, story or visual direction, and concrete context behind references like "that book" or "this cover". Do not make the next session infer missing context from this chat. Put known execution arguments into the structured createBook / shortRun / playStart / generateCover / scriptCreate / storyboardCreate / interactiveFilmCreate fields as well; do not leave them only in instruction text. For interactive worlds, set playStart.mode=open when the user asks for open/free-form play, and playStart.mode=guided when the user asks for branching/choice-led play. For interactive film/drama/game-script deliverables with branch logic, flags, endings, scripts, and storyboards, use interactive_film_create instead of play_start.
-If information is missing, ask one key question. Do not create, write, edit, or generate files in chat.
+If information is missing, ask one key question. Do not create, write, edit, or generate story/image artifacts in chat; research_web reference reports are the only exception.
 
 ${commonOutputRules(false)}`;
+}
+
+function appendSkillGuidance(prompt: string, isZh: boolean, skills: SkillResolutionResult | undefined): string {
+  if (!skills || skills.usedSkills.length === 0) return prompt;
+  const skillLines = skills.usedSkills.flatMap((skill) => {
+    const prefix = skills.forcedSkillIds.includes(skill.id) ? (isZh ? "强制" : "forced") : (isZh ? "自动" : "auto");
+    const packs = skill.promptPacks.length > 0 ? `; promptPacks=${skill.promptPacks.join(", ")}` : "";
+    const line = `- ${skill.id} (${prefix}): ${skill.whenToUse}${packs}`;
+    const body = skill.body.trim();
+    if (!body) return [line];
+    return [
+      line,
+      isZh ? `  领域规则：\n${indentSkillBody(body, "  ")}` : `  Domain guidance:\n${indentSkillBody(body, "  ")}`,
+    ];
+  });
+  const unavailable = skills.missingSkillIds.length > 0
+    ? (isZh
+        ? `\n不可用 skill：${skills.missingSkillIds.join(", ")}。不要假装已使用这些 skill。`
+        : `\nUnavailable skills: ${skills.missingSkillIds.join(", ")}. Do not pretend these skills were used.`)
+    : "";
+  const disabled = skills.disabledSkillIds.length > 0
+    ? (isZh
+        ? `\n已禁用 skill：${skills.disabledSkillIds.join(", ")}。不要按这些 skill 调整行为。`
+        : `\nDisabled skills: ${skills.disabledSkillIds.join(", ")}. Do not follow those skills.`)
+    : "";
+  const guidance = isZh
+    ? [
+        "## Skill 指导",
+        "",
+        "本轮可用的专业 skill 如下。强制 skill 是用户/界面明确要求的专业能力，除非不可用或违反安全/权限边界，否则必须按它的领域规则组织回答和工具提案。",
+        "Skill 只提供专业指导、上下文需求和 prompt pack；它不授予执行权限。创建、写入、编辑、生成图片等副作用仍必须通过当前 session 允许的工具和确认闸门。",
+        ...skillLines,
+        unavailable.trim(),
+        disabled.trim(),
+      ].filter(Boolean).join("\n")
+    : [
+        "## Skill Guidance",
+        "",
+        "Available professional skills for this turn are listed below. Forced skills were explicitly requested by the user or UI; follow their domain guidance unless unavailable or unsafe.",
+        "Skills provide guidance, context needs, and prompt packs only. They do not grant execution permission. Side effects still require the current session's allowed tools and confirmation gates.",
+        ...skillLines,
+        unavailable.trim(),
+        disabled.trim(),
+      ].filter(Boolean).join("\n");
+  return `${prompt}\n\n${guidance}`;
+}
+
+function indentSkillBody(body: string, prefix: string): string {
+  return body
+    .split(/\r?\n/)
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
 }
 
 function buildBookCreatePrompt(isZh: boolean, confirmed: boolean): string {
@@ -67,7 +121,7 @@ function buildBookCreatePrompt(isZh: boolean, confirmed: boolean): string {
     return isZh
       ? `你是 InkOS 建书助手。当前入口先分阶段聊清长篇/连载书籍草案，再让用户确认是否创建。
 
-还不能直接建书。故事核心齐全时必须调用 propose_action，action=create_book；不要用普通文字手写确认卡。用户说“先确认/确认后再建”时，propose_action 就是确认卡，仍然调用它，不要先用普通文字整理一遍再等用户二次确认。
+还不能直接建书。故事核心齐全时必须调用 propose_action，action=create_book；不要用普通文字手写确认卡。用户说“先确认/确认后再建”时，propose_action 就是确认卡，仍然调用它，不要先用普通文字整理一遍再等用户二次确认。用户明确要求联网查年代、职业、制度、地域或世界观资料时，可以调用 research_web；研究报告只是建书参考，不会自动写入设定。
 故事核心：书名、题材、平台、世界观、主角、核心冲突。用户已经给出书名/题材方向/主角或开局压力时，就视为足够进入确认卡；核心冲突没有明说时，基于题材、主角处境和用户要求提炼一个“暂定核心冲突”，不要卡住追问。目标章数/单章字数是运行参数，用户没说就用默认 200/3000，不要追问。
 
 确认卡 instruction 必须自包含，写清：标题、题材、平台、篇幅、世界观与规则、主角压力、核心冲突、第一阶段方向、用户的人称/比例/禁忌/节奏要求。同时填 createBook：title、genre、platform、targetChapters、chapterWordCount、language；用户没说章数/单章字数就填默认 200/3000，不要只把这些写在 instruction 文本里。
@@ -76,7 +130,7 @@ function buildBookCreatePrompt(isZh: boolean, confirmed: boolean): string {
 ${commonOutputRules(true)}`
       : `You are the InkOS book creation assistant. This surface stages a long-form / serialized book draft and asks for confirmation before creation.
 
-Do not create directly yet. When the story core is clear, you must call propose_action with action=create_book; do not hand-write the confirmation card as plain text. If the user says "confirm first" or "create after confirmation", propose_action is that confirmation card; still call it instead of summarizing in plain text and waiting for a second confirmation.
+Do not create directly yet. When the story core is clear, you must call propose_action with action=create_book; do not hand-write the confirmation card as plain text. If the user says "confirm first" or "create after confirmation", propose_action is that confirmation card; still call it instead of summarizing in plain text and waiting for a second confirmation. If the user explicitly asks for web research about era, profession, institutions, region, or worldbuilding references, you may call research_web; research reports are references only and do not automatically become canon.
 Story core: title, genre, platform, world, protagonist, and core conflict. If the user gives a title / genre direction / protagonist or opening pressure, that is enough for a confirmation card; when core conflict is not explicit, infer a working core conflict from the genre, protagonist situation, and user constraints instead of blocking on a question. Target chapters / words per chapter are run parameters; if omitted, use defaults 200/3000 and do not ask.
 
 The confirmation instruction must be self-contained: title, genre, platform, length, world/rules, protagonist pressure, core conflict, first-phase direction, and user constraints such as POV, ratios, taboos, or pacing. Also fill createBook: title, genre, platform, targetChapters, chapterWordCount, language; if chapter count / per-chapter length is omitted, fill the defaults 200/3000 instead of leaving them only in instruction text.
@@ -427,8 +481,10 @@ function buildBookPrompt(bookId: string, isZh: boolean): string {
 - write_truth_file：覆盖当前书真相/设定文件。优先路径：outline/story_frame.md、outline/volume_map.md、roles/major/<name>.md、roles/minor/<name>.md；兼容 current_focus.md、author_intent.md、current_state.md。
 - 角色卡编辑走 write_truth_file，不走 patch_chapter_text：主要角色路径 roles/主要角色/<角色名>.md 或 roles/major/<name>.md；次要角色路径 roles/次要角色/<角色名>.md 或 roles/minor/<name>.md。改角色动机、关系、性格锁、禁忌、当前状态时，先读对应角色卡，保留未被用户要求改变的内容，再整卡覆盖。
 - rename_entity：统一改角色/实体名。
+- update_chapter_title：修改已有章节的页面显示标题，并同步章节索引；用户要求“标题不对 / 改章节标题 / 页面标题改成 X”时使用。
 - patch_chapter_text：对已有章节做局部定点修补。
 - replace_chapter_text：用户已经给出某章完整替换正文时，整章覆盖并标记复核；不要用它让模型自己生成新正文，模型生成型重写仍走 reviser。
+- research_web：用户明确要求联网研究、事实核查、年代/职业/地域/制度资料时使用；报告保存为参考材料，不会自动改当前书设定或正文。
 - grep：搜索内容。
 - ls：列出文件或章节。
 
@@ -447,9 +503,11 @@ function buildBookPrompt(bookId: string, isZh: boolean): string {
 - 用户想改设定/真相文件 → write_truth_file。
 - 用户想改角色卡/人物设定 → 先 read 对应 roles 文件，再 write_truth_file 覆盖该角色卡。
 - 用户要求角色或实体改名 → rename_entity。
+- 用户要求修改章节标题或页面显示标题 → update_chapter_title。不要回答“我没有权限改页面/索引/index.json”。
 - 用户要求某章内局部小修 → patch_chapter_text。
 - 用户粘贴/提供某章完整新正文并要求替换 → replace_chapter_text。
 - 用户要求生成或重做封面 → generate_cover。
+- 用户要求查外部事实、年代职业细节、真实地域制度资料 → research_web；如需把研究结果写入设定，必须再由用户明确确认后用 write_truth_file。
 - 其他普通讨论 → 直接回答。
 
 ## 章节索引
@@ -481,8 +539,10 @@ ${commonOutputRules(true)}`
 - write_truth_file: replace active-book truth/settings files. Prefer outline/story_frame.md, outline/volume_map.md, roles/major/<name>.md, roles/minor/<name>.md; flat files such as current_focus.md, author_intent.md, and current_state.md remain supported.
 - Role-card edits use write_truth_file, not patch_chapter_text: major characters live under roles/major/<name>.md or roles/主要角色/<name>.md; minor characters under roles/minor/<name>.md or roles/次要角色/<name>.md. For character motive, relationship, personality lock, taboo, or current-state edits, read the role card first, preserve unchanged content, then replace that card.
 - rename_entity: rename characters or entities.
+- update_chapter_title: update an existing chapter's visible page title and synchronize the chapter index.
 - patch_chapter_text: apply a local chapter patch.
 - replace_chapter_text: replace a whole chapter only when the user provides the complete replacement chapter text; mark it for review. Do not use it for model-generated rewrites — use reviser.
+- research_web: collect web research or fact checks for era/profession/region/institution details. Reports are saved as reference material and do not automatically change canon or prose.
 - grep: search content.
 - ls: list files or chapters.
 
@@ -501,9 +561,11 @@ ${commonOutputRules(true)}`
 - Setting/truth-file changes → write_truth_file.
 - Character-card/person-setting changes → read the matching roles file first, then write_truth_file.
 - Character/entity renames → rename_entity.
+- Chapter title / visible page title changes → update_chapter_title. Do not claim you cannot edit the page title or index.
 - Local chapter edits → patch_chapter_text.
 - User-provided full replacement for an existing chapter → replace_chapter_text.
 - Cover generation/regeneration → generate_cover.
+- External facts, era/profession details, or real-world regional/institutional references → research_web. If the research should affect canon, wait for explicit confirmation and then use write_truth_file.
 - Ordinary discussion → answer directly.
 
 ## Chapter Index
@@ -523,25 +585,27 @@ export function buildAgentSystemPrompt(
 ): string {
   const isZh = language === "zh";
   const personalizationBlock = buildPersonalizationBlock(options.personalizationMemory, isZh);
-  const appendPersonalization = (prompt: string): string =>
-    personalizationBlock ? `${prompt}\n\n${personalizationBlock}` : prompt;
+  const withGuidance = (prompt: string): string => {
+    const withSkills = appendSkillGuidance(prompt, isZh, options.skills);
+    return personalizationBlock ? `${withSkills}\n\n${personalizationBlock}` : withSkills;
+  };
 
-  if (sessionKind === "book-create") return appendPersonalization(buildBookCreatePrompt(isZh, isConfirmedAction(options, "create_book")));
+  if (sessionKind === "book-create") return withGuidance(buildBookCreatePrompt(isZh, isConfirmedAction(options, "create_book")));
   if (sessionKind === "short") {
     const confirmedIntent = isConfirmedAction(options, "short_run")
       ? "short_run"
       : isConfirmedAction(options, "generate_cover")
         ? "generate_cover"
         : undefined;
-    return appendPersonalization(buildShortPrompt(isZh, confirmedIntent));
+    return withGuidance(buildShortPrompt(isZh, confirmedIntent));
   }
-  if (sessionKind === "play") return appendPersonalization(buildPlayPrompt(isZh, isConfirmedAction(options, "play_start"), options.playWorldExists === true));
-  if (sessionKind === "script") return appendPersonalization(buildScriptPrompt(isZh, isConfirmedAction(options, "script_create")));
-  if (sessionKind === "storyboard") return appendPersonalization(buildStoryboardPrompt(isZh, isConfirmedAction(options, "storyboard_create")));
-  if (sessionKind === "interactive-film") return appendPersonalization(buildInteractiveFilmPrompt(isZh, isConfirmedAction(options, "interactive_film_create")));
-  if (sessionKind === "edit") return appendPersonalization(buildEditPrompt(bookId, isZh));
-  if (sessionKind === "book" && bookId) return appendPersonalization(buildBookPrompt(bookId, isZh));
-  return appendPersonalization(buildChatPrompt(isZh));
+  if (sessionKind === "play") return withGuidance(buildPlayPrompt(isZh, isConfirmedAction(options, "play_start"), options.playWorldExists === true));
+  if (sessionKind === "script") return withGuidance(buildScriptPrompt(isZh, isConfirmedAction(options, "script_create")));
+  if (sessionKind === "storyboard") return withGuidance(buildStoryboardPrompt(isZh, isConfirmedAction(options, "storyboard_create")));
+  if (sessionKind === "interactive-film") return withGuidance(buildInteractiveFilmPrompt(isZh, isConfirmedAction(options, "interactive_film_create")));
+  if (sessionKind === "edit") return withGuidance(buildEditPrompt(bookId, isZh));
+  if (sessionKind === "book" && bookId) return withGuidance(buildBookPrompt(bookId, isZh));
+  return withGuidance(buildChatPrompt(isZh));
 }
 
 function buildPersonalizationBlock(memory: string | undefined, isZh: boolean): string {

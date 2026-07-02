@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { serve } from "@hono/node-server";
+import { gzipSync } from "node:zlib";
 import {
   StateManager,
   PipelineRunner,
@@ -36,6 +37,11 @@ import {
   fetchWithProxy,
   chatCompletion,
   buildExportArtifact,
+  evaluateBookQuality,
+  ConsolidatorAgent,
+  DetectionConfigSchema,
+  ResearchSearchConfigSchema,
+  InputGovernanceModeSchema,
   GLOBAL_ENV_PATH,
   COVER_PROVIDER_PRESETS,
   Scheduler,
@@ -49,9 +55,14 @@ import {
   normalizeActionPayload as normalizeCoreActionPayload,
   normalizePlayMode as normalizeCorePlayMode,
   normalizeRequestedIntent as normalizeCoreRequestedIntent,
+  normalizeSkillIdList as normalizeCoreSkillIdList,
   inferLanguage,
+  createSkillRegistry,
+  loadConfiguredCapabilitySkills,
+  CapabilitySkillManifestSchema,
   type ActionPayload,
   type ActionSource,
+  type CapabilitySkillManifest,
   createGenerateCoverTool,
   createInteractiveFilmCreationTool,
   createPlayStartTool,
@@ -59,6 +70,20 @@ import {
   createShortFictionRunTool,
   createStoryboardCreationTool,
   createSubAgentTool,
+  createDraftStructureTool,
+  createConnectChoiceTool,
+  createRemoveNodeTool,
+  filmLLMDepsFromClient,
+  applyGraphDelta,
+  loadStoryGraph,
+  reviewStoryGraph,
+  exportInk,
+  buildPlayableHtml,
+  analyzeEmotionalArcs,
+  analyzePathDistribution,
+  generateNodeImage,
+  defaultNodeImageDeps,
+  type NodeImageDeps,
   type ResolvedModel,
   type PipelineConfig,
   type PlayMode,
@@ -68,7 +93,7 @@ import {
   type RequestedIntent,
   type SessionKind,
 } from "@actalk/inkos-core";
-import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isSafeBookId } from "./safety.js";
 import { ApiError } from "./errors.js";
@@ -93,6 +118,11 @@ const PIPELINE_STAGES: Record<string, string[]> = {
   ],
   auditor: ["审计章节"],
 };
+
+function attachmentDisposition(fileName: string): string {
+  const safeAscii = fileName.replace(/[^A-Za-z0-9._-]+/g, "_") || "download";
+  return `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
 
 const AGENT_LABELS: Record<string, string> = {
   architect: "建书", writer: "写作", auditor: "审计",
@@ -133,6 +163,76 @@ function compareServiceListItems(
     return (leftPriority === -1 ? 999 : leftPriority) - (rightPriority === -1 ? 999 : rightPriority);
   }
   return 0;
+}
+
+async function buildTarArchive(sourceDir: string, packageRootName: string): Promise<Buffer> {
+  const files = await listArchiveFiles(sourceDir);
+  const chunks: Buffer[] = [];
+  for (const file of files) {
+    const payload = await readFile(join(sourceDir, file));
+    const archiveName = normalizeArchivePath(join(packageRootName, file));
+    chunks.push(createTarHeader(archiveName, payload.byteLength));
+    chunks.push(payload);
+    const padding = (512 - (payload.byteLength % 512)) % 512;
+    if (padding > 0) chunks.push(Buffer.alloc(padding));
+  }
+  chunks.push(Buffer.alloc(1024));
+  return Buffer.concat(chunks);
+}
+
+async function listArchiveFiles(dir: string, prefix = ""): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    if (entry.name === ".DS_Store") continue;
+    const relativePath = prefix ? join(prefix, entry.name) : entry.name;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listArchiveFiles(fullPath, relativePath));
+    } else if (entry.isFile()) {
+      files.push(normalizeArchivePath(relativePath));
+    } else {
+      const info = await stat(fullPath).catch(() => null);
+      if (info?.isFile()) files.push(normalizeArchivePath(relativePath));
+    }
+  }
+  return files.sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeArchivePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+/g, "");
+}
+
+function createTarHeader(name: string, size: number): Buffer {
+  const header = Buffer.alloc(512, 0);
+  writeTarString(header, 0, 100, name);
+  writeTarOctal(header, 100, 8, 0o644);
+  writeTarOctal(header, 108, 8, 0);
+  writeTarOctal(header, 116, 8, 0);
+  writeTarOctal(header, 124, 12, size);
+  writeTarOctal(header, 136, 12, Math.floor(Date.now() / 1000));
+  header.fill(0x20, 148, 156);
+  header[156] = "0".charCodeAt(0);
+  writeTarString(header, 257, 6, "ustar");
+  writeTarString(header, 263, 2, "00");
+  let checksum = 0;
+  for (const byte of header) checksum += byte;
+  writeTarOctal(header, 148, 8, checksum);
+  return header;
+}
+
+function writeTarString(header: Buffer, offset: number, length: number, value: string): void {
+  const encoded = Buffer.from(value);
+  if (encoded.byteLength > length) {
+    throw new Error(`Archive path is too long for tar header: ${value}`);
+  }
+  encoded.copy(header, offset);
+}
+
+function writeTarOctal(header: Buffer, offset: number, length: number, value: number): void {
+  const text = value.toString(8).padStart(length - 1, "0").slice(-(length - 1));
+  header.write(text, offset, length - 1, "ascii");
+  header[offset + length - 1] = 0;
 }
 
 function isHeaderSafeApiKey(value: string): boolean {
@@ -256,8 +356,8 @@ function resolveProjectImageFile(root: string, rawPath: string): { readonly reso
   ) {
     throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Invalid project file path");
   }
-  if (!relPath.startsWith("shorts/") && !relPath.startsWith("covers/")) {
-    throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Only generated shorts/ and covers/ images can be previewed");
+  if (!relPath.startsWith("shorts/") && !relPath.startsWith("covers/") && !relPath.startsWith("interactive-films/")) {
+    throw new ApiError(400, "INVALID_PROJECT_FILE_PATH", "Only generated shorts/, covers/, interactive-films/ images can be previewed");
   }
 
   const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
@@ -345,6 +445,17 @@ function hasSuccessfulSubAgentExec(
   );
 }
 
+function hasSuccessfulToolExec(
+  execs: ReadonlyArray<CollectedToolExec>,
+  tool: string,
+): boolean {
+  return execs.some((exec) =>
+    exec.tool === tool
+    && exec.status === "completed"
+    && !isLikelyFailedToolResult(exec)
+  );
+}
+
 function isLikelyWriteNextInstruction(instruction: string): boolean {
   const trimmed = instruction.trim();
   return /^(continue|继续|继续写|写下一章|write next|下一章|再来一章)$/i.test(trimmed)
@@ -382,6 +493,142 @@ function normalizeStudioActionPayload(value: unknown): ActionPayload | undefined
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new ApiError(400, "INVALID_ACTION_PAYLOAD", `Invalid actionPayload: ${message}`);
+  }
+}
+
+function normalizeStudioSkillIdList(value: unknown, field: string): string[] {
+  try {
+    return normalizeCoreSkillIdList(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ApiError(400, "INVALID_SKILL_ID", `Invalid ${field}: ${message}`);
+  }
+}
+
+function normalizeStudioSkillId(value: unknown, field = "skillId"): string {
+  const [id] = normalizeStudioSkillIdList([value], field);
+  if (!id) throw new ApiError(400, "INVALID_SKILL_ID", `Invalid ${field}: empty`);
+  return id;
+}
+
+function projectSkillsDir(root: string): string {
+  return join(root, ".inkos", "skills");
+}
+
+function projectSkillDir(root: string, id: string): string {
+  return join(projectSkillsDir(root), id);
+}
+
+function projectSkillPath(root: string, id: string): string {
+  return join(projectSkillDir(root, id), "SKILL.md");
+}
+
+function toStudioSkill(skill: CapabilitySkillManifest, root: string, projectSkillIds: ReadonlySet<string>) {
+  const projectPath = projectSkillPath(root, skill.id);
+  const isProjectFile = projectSkillIds.has(skill.id);
+  return {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    whenToUse: skill.whenToUse,
+    triggers: skill.triggers,
+    sessionKinds: skill.sessionKinds,
+    promptPacks: skill.promptPacks,
+    toolHints: skill.toolHints,
+    contextNeeds: skill.contextNeeds,
+    body: skill.body,
+    source: isProjectFile ? "project" : skill.source,
+    editable: isProjectFile,
+    path: isProjectFile ? relative(root, projectPath) : undefined,
+  };
+}
+
+function normalizeSkillPayload(value: unknown, idOverride?: string): CapabilitySkillManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError(400, "INVALID_SKILL_PAYLOAD", "Skill payload must be an object");
+  }
+  const data = value as Record<string, unknown>;
+  const id = normalizeStudioSkillId(idOverride ?? data.id, "id");
+  const textOr = (field: string, fallback: string): string => {
+    const raw = data[field];
+    return typeof raw === "string" && raw.trim() ? raw.trim() : fallback;
+  };
+  const stringList = (field: string): string[] => (
+    Array.isArray(data[field])
+      ? data[field]
+          .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+          .map((item) => item.trim())
+      : []
+  );
+  try {
+    return CapabilitySkillManifestSchema.parse({
+      id,
+      name: textOr("name", id),
+      description: textOr("description", "Project runtime skill."),
+      whenToUse: textOr("whenToUse", "Use when explicitly selected by the user."),
+      triggers: stringList("triggers"),
+      sessionKinds: stringList("sessionKinds"),
+      promptPacks: stringList("promptPacks"),
+      toolHints: stringList("toolHints"),
+      contextNeeds: Array.isArray(data.contextNeeds) ? data.contextNeeds : [],
+      body: typeof data.body === "string" ? data.body : "",
+      source: "project",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ApiError(400, "INVALID_SKILL_PAYLOAD", message);
+  }
+}
+
+function serializeProjectSkill(skill: CapabilitySkillManifest): string {
+  const frontmatter = {
+    id: skill.id,
+    name: skill.name,
+    description: skill.description,
+    whenToUse: skill.whenToUse,
+    triggers: skill.triggers,
+    sessionKinds: skill.sessionKinds,
+    promptPacks: skill.promptPacks,
+    toolHints: skill.toolHints,
+    contextNeeds: skill.contextNeeds,
+  };
+  return [
+    "---",
+    ...Object.entries(frontmatter).map(([key, value]) => `${key}: ${JSON.stringify(value)}`),
+    "---",
+    skill.body.trim(),
+    "",
+  ].join("\n");
+}
+
+async function loadStudioSkills(root: string) {
+  const configured = await loadConfiguredCapabilitySkills({ projectRoot: root });
+  const projectSkillIds = await listProjectSkillIds(root);
+  const registry = createSkillRegistry({ skills: configured.skills });
+  return {
+    skills: registry.listSkills().map((skill) => toStudioSkill(skill, root, projectSkillIds)),
+    diagnostics: configured.diagnostics,
+  };
+}
+
+async function listProjectSkillIds(root: string): Promise<Set<string>> {
+  try {
+    const entries = await readdir(projectSkillsDir(root), { withFileTypes: true });
+    const ids = new Set<string>();
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const id = normalizeStudioSkillId(entry.name, "skillId");
+      try {
+        const info = await stat(projectSkillPath(root, id));
+        if (info.isFile()) ids.add(id);
+      } catch {
+        // Ignore incomplete project skill directories.
+      }
+    }
+    return ids;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Set();
+    throw error;
   }
 }
 
@@ -727,7 +974,10 @@ function isConfirmedProductionAction(args: {
     || args.requestedIntent === "storyboard_create"
     || args.requestedIntent === "interactive_film_create"
     || args.requestedIntent === "play_start"
-      || args.requestedIntent === "generate_cover"
+    || args.requestedIntent === "generate_cover"
+    || args.requestedIntent === "draft_structure"
+    || args.requestedIntent === "connect_choice"
+    || args.requestedIntent === "remove_node"
     );
 }
 
@@ -748,6 +998,7 @@ async function executeConfirmedProductionAction(args: {
   readonly pipeline: PipelineRunner;
   readonly root: string;
   readonly sessionId: string;
+  readonly bookId: string | null;
   readonly streamSessionId: string;
   readonly instruction: string;
   readonly requestedIntent: RequestedIntent;
@@ -762,7 +1013,10 @@ async function executeConfirmedProductionAction(args: {
     | ReturnType<typeof createScriptCreationTool>
     | ReturnType<typeof createStoryboardCreationTool>
     | ReturnType<typeof createInteractiveFilmCreationTool>
-    | ReturnType<typeof createPlayStartTool>;
+    | ReturnType<typeof createPlayStartTool>
+    | ReturnType<typeof createDraftStructureTool>
+    | ReturnType<typeof createConnectChoiceTool>
+    | ReturnType<typeof createRemoveNodeTool>;
   let params: Record<string, unknown>;
   let agent: string | undefined;
 
@@ -885,6 +1139,38 @@ async function executeConfirmedProductionAction(args: {
       ...(payload?.mode ? { mode: payload.mode } : {}),
       ...(initialScene ? { initialScene } : {}),
       ...(payload?.suggestedActions ? { suggestedActions: payload.suggestedActions } : {}),
+    };
+  } else if (args.requestedIntent === "draft_structure") {
+    const payload = actionPayload?.draftStructure;
+    const projectId = payload?.projectId ?? args.bookId;
+    if (!projectId) throw new ApiError(400, "INVALID_ID", "interactive-film action requires a project id (bookId)");
+    const agentCtx = args.pipeline.createAgentContext("film-authoring", projectId);
+    const deps = filmLLMDepsFromClient(agentCtx.client, agentCtx.model);
+    tool = createDraftStructureTool(args.root, projectId, deps);
+    params = {
+      instruction: payload?.instruction?.trim() || args.instruction,
+    };
+  } else if (args.requestedIntent === "connect_choice") {
+    const payload = actionPayload?.connectChoice;
+    if (!payload?.node) {
+      throw new ApiError(400, "CONFIRMED_ACTION_PAYLOAD_INCOMPLETE", "确认连接选择缺少节点数据，请重新生成确认卡。");
+    }
+    const projectId = payload?.projectId ?? args.bookId;
+    if (!projectId) throw new ApiError(400, "INVALID_ID", "interactive-film action requires a project id (bookId)");
+    tool = createConnectChoiceTool(args.root, projectId);
+    params = {
+      node: payload.node,
+    };
+  } else if (args.requestedIntent === "remove_node") {
+    const payload = actionPayload?.removeNode;
+    if (!payload?.nodeId) {
+      throw new ApiError(400, "CONFIRMED_ACTION_PAYLOAD_INCOMPLETE", "确认删除节点缺少 nodeId，请重新生成确认卡。");
+    }
+    const projectId = payload?.projectId ?? args.bookId;
+    if (!projectId) throw new ApiError(400, "INVALID_ID", "interactive-film action requires a project id (bookId)");
+    tool = createRemoveNodeTool(args.root, projectId);
+    params = {
+      nodeId: payload.nodeId,
     };
   } else {
     throw new ApiError(400, "UNSUPPORTED_CONFIRMED_ACTION", `Unsupported confirmed action: ${args.requestedIntent}`);
@@ -1910,7 +2196,7 @@ async function probeServiceCapabilities(args: {
 
 // --- Server factory ---
 
-export function createStudioServer(initialConfig: ProjectConfig, root: string) {
+export function createStudioServer(initialConfig: ProjectConfig, root: string, overrides: { readonly nodeImageGenerator?: NodeImageDeps } = {}) {
   const app = new Hono();
   const state = new StateManager(root);
   let cachedConfig = initialConfig;
@@ -2935,6 +3221,43 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     });
   });
 
+  app.get("/api/v1/skills", async (c) => {
+    const result = await loadStudioSkills(root);
+    return c.json(result);
+  });
+
+  app.post("/api/v1/skills", async (c) => {
+    const payload = await c.req.json().catch(() => {
+      throw new ApiError(400, "INVALID_SKILL_PAYLOAD", "Skill payload must be JSON");
+    });
+    const skill = normalizeSkillPayload(payload);
+    await mkdir(projectSkillDir(root, skill.id), { recursive: true });
+    await writeFile(projectSkillPath(root, skill.id), serializeProjectSkill(skill), "utf-8");
+    return c.json({ skill: toStudioSkill(skill, root, new Set([skill.id])) });
+  });
+
+  app.put("/api/v1/skills/:skillId", async (c) => {
+    const id = normalizeStudioSkillId(c.req.param("skillId"), "skillId");
+    const payload = await c.req.json().catch(() => {
+      throw new ApiError(400, "INVALID_SKILL_PAYLOAD", "Skill payload must be JSON");
+    });
+    const skill = normalizeSkillPayload(payload, id);
+    await mkdir(projectSkillDir(root, skill.id), { recursive: true });
+    await writeFile(projectSkillPath(root, skill.id), serializeProjectSkill(skill), "utf-8");
+    return c.json({ skill: toStudioSkill(skill, root, new Set([skill.id])) });
+  });
+
+  app.delete("/api/v1/skills/:skillId", async (c) => {
+    const id = normalizeStudioSkillId(c.req.param("skillId"), "skillId");
+    try {
+      await access(projectSkillPath(root, id));
+    } catch {
+      throw new ApiError(404, "SKILL_NOT_FOUND", `Project skill not found: ${id}`);
+    }
+    await rm(projectSkillDir(root, id), { recursive: true, force: true });
+    return c.json({ ok: true });
+  });
+
   app.get("/api/v1/project/files/:file{.+}", async (c) => {
     const file = resolveProjectImageFile(root, c.req.param("file"));
 
@@ -3245,6 +3568,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       actionSource: reqActionSource,
       requestedIntent: reqRequestedIntent,
       actionPayload: reqActionPayload,
+      requestedSkills: reqRequestedSkills,
+      disabledSkills: reqDisabledSkills,
       playMode: reqPlayMode,
       model: reqModel,
       service: reqService,
@@ -3258,6 +3583,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       actionSource?: string;
       requestedIntent?: string;
       actionPayload?: unknown;
+      requestedSkills?: unknown;
+      disabledSkills?: unknown;
       playMode?: string;
       model?: string;
       service?: string;
@@ -3280,9 +3607,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const actionSource = normalizeStudioActionSource(reqActionSource);
     const requestedIntent = normalizeStudioRequestedIntent(reqRequestedIntent);
     const actionPayload = normalizeStudioActionPayload(reqActionPayload);
+    const requestedSkills = normalizeStudioSkillIdList(reqRequestedSkills, "requestedSkills");
+    const disabledSkills = normalizeStudioSkillIdList(reqDisabledSkills, "disabledSkills");
     const playMode = normalizeStudioPlayMode(reqPlayMode);
 
-    broadcast("agent:start", { instruction, activeBookId, sessionId, actionSource, requestedIntent });
+    broadcast("agent:start", { instruction, activeBookId, sessionId, actionSource, requestedIntent, requestedSkills });
 
     try {
       // Load config + create LLM client (pipeline created after model resolution)
@@ -3323,9 +3652,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         );
         bookSession = updatedSession;
       }
-      if (agentBookId) {
+      let activeBookConfig: { readonly language?: string } | null = null;
+      if (agentBookId && sessionKind !== "interactive-film-authoring") {
         try {
-          await state.loadBookConfig(agentBookId);
+          activeBookConfig = await state.loadBookConfig(agentBookId);
         } catch {
           throw new ApiError(404, "BOOK_NOT_FOUND", `Book not found: ${agentBookId}`);
         }
@@ -3337,6 +3667,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         }
       }
       const streamSessionId = loadedBookSession.sessionId;
+      const surfaceLanguage = activeBookConfig?.language ?? config.language ?? "zh";
       const titleBeforeRun = bookSession.title;
       let sessionTitleBroadcasted = false;
       const refreshBookSessionFromTranscript = async (): Promise<void> => {
@@ -3538,6 +3869,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             pipeline,
             root,
             sessionId: bookSession.sessionId,
+            bookId: agentBookId,
             streamSessionId,
             instruction,
             requestedIntent,
@@ -3718,8 +4050,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           pipeline,
           projectRoot: root,
           bookId: agentBookId,
+          sessionKind,
+          playMode,
+          actionSource,
+          requestedIntent,
+          actionPayload,
+          requestedSkills,
+          disabledSkills,
           sessionId: bookSession.sessionId,
-          language: config.language ?? "zh",
+          language: surfaceLanguage,
           personalizationMemory: await loadPersonalizationMemory(root),
           onEvent: (event) => {
             if (event.type === "message_update") {
@@ -3860,6 +4199,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       };
 
       if (!result.responseText) {
+        if (hasSuccessfulToolExec(collectedToolExecs, "propose_action")) {
+          await refreshBookSessionFromTranscript();
+          broadcast("agent:complete", { instruction, activeBookId, sessionId: bookSession.sessionId, sessionKind });
+          return c.json({
+            response: "",
+            session: {
+              sessionId: bookSession.sessionId,
+              sessionKind,
+              ...(bookSession.bookId ? { activeBookId: bookSession.bookId } : {}),
+            },
+            details: { toolExecutions: collectedToolExecs },
+          });
+        }
+
         if (result.errorMessage) {
           if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
             await finalizeCreatedBook();
@@ -3884,7 +4237,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             fallbackClient,
             activeModel,
             [
-              { role: "system", content: buildAgentSystemPrompt(agentBookId, config.language ?? "zh", agentBookId ? "book" : "chat", { personalizationMemory: await loadPersonalizationMemory(root) }) },
+              { role: "system", content: buildAgentSystemPrompt(agentBookId, surfaceLanguage, agentBookId ? "book" : "chat", { personalizationMemory: await loadPersonalizationMemory(root) }) },
               { role: "user", content: instruction },
             ],
             { maxTokens: 256 },
@@ -4249,6 +4602,22 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       service: typeof llm.service === "string" ? llm.service : null,
       defaultModel,
     });
+  });
+
+  // --- Research search provider ---
+
+  app.get("/api/v1/project/research-search", async (c) => {
+    const raw = await loadRawConfig(root);
+    return c.json({ researchSearch: ResearchSearchConfigSchema.parse(raw.researchSearch ?? {}) });
+  });
+
+  app.put("/api/v1/project/research-search", async (c) => {
+    const body = await c.req.json<{ researchSearch?: unknown }>();
+    const researchSearch = ResearchSearchConfigSchema.parse(body.researchSearch ?? {});
+    const raw = await loadRawConfig(root);
+    raw.researchSearch = researchSearch;
+    await saveRawConfig(root, raw);
+    return c.json({ ok: true, researchSearch });
   });
 
   // --- Chapter review mode (C4a: auto pipeline vs manual checkpoint) ---
@@ -4850,6 +5219,165 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     } catch { /* ignore */ }
 
     return c.json(checks);
+  });
+
+  app.get("/api/v1/interactive-films", async (c) => {
+    const filmsDir = join(root, "interactive-films");
+    let entries: string[] = [];
+    try {
+      const dirents = await readdir(filmsDir, { withFileTypes: true });
+      entries = dirents.filter((d) => d.isDirectory()).map((d) => d.name);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    const films: Array<{ projectId: string; title: string }> = [];
+    for (const projectId of entries) {
+      if (!isSafeBookId(projectId)) continue;
+      try {
+        const graph = await loadStoryGraph(root, projectId);
+        if (graph) films.push({ projectId, title: graph.title || projectId });
+      } catch { /* skip dirs without valid story-graph */ }
+    }
+    films.sort((a, b) => a.title.localeCompare(b.title, "zh"));
+    return c.json({ films });
+  });
+
+  app.post("/api/v1/projects/:id/story-graph/delta", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) {
+      return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    }
+    const { delta } = await c.req.json<{ delta: unknown }>();
+    const { graph, rev } = await applyGraphDelta({ projectRoot: root, projectId: id, delta: delta as never });
+    return c.json({ rev, graph });
+  });
+
+  app.get("/api/v1/projects/:id/story-graph", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) {
+      return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    }
+    const graphPath = join(root, "interactive-films", id, "story-graph.json");
+    try {
+      const raw = await readFile(graphPath, "utf-8");
+      return c.json(JSON.parse(raw));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+      }
+      throw error;
+    }
+  });
+
+  app.get("/api/v1/projects/:id/export", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) {
+      return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    }
+    const projectDir = join(root, "interactive-films", id);
+    try {
+      await access(projectDir);
+      const archive = gzipSync(await buildTarArchive(projectDir, id));
+      return new Response(new Uint8Array(archive), {
+        headers: {
+          "Content-Type": "application/gzip",
+          "Content-Disposition": `attachment; filename="${encodeURIComponent(id)}.tar.gz"`,
+        },
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return c.json({ error: { code: "NOT_FOUND", message: `interactive film project not found for ${id}` } }, 404);
+      }
+      throw error;
+    }
+  });
+
+  app.get("/api/v1/projects/:id/story-graph/validation", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) {
+      return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    }
+    const graph = await loadStoryGraph(root, id);
+    if (!graph) {
+      return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+    }
+    return c.json(reviewStoryGraph(graph));
+  });
+
+  app.get("/api/v1/projects/:id/story-graph/analysis", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    const graph = await loadStoryGraph(root, id);
+    if (!graph) return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+    return c.json({ report: reviewStoryGraph(graph), arcs: analyzeEmotionalArcs(graph), distribution: analyzePathDistribution(graph) });
+  });
+
+  app.get("/api/v1/projects/:id/export/json", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    const graph = await loadStoryGraph(root, id);
+    if (!graph) return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+    return new Response(JSON.stringify(graph, null, 2), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": attachmentDisposition(`${id}.story-graph.json`),
+      },
+    });
+  });
+
+  app.get("/api/v1/projects/:id/export/ink", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    const graph = await loadStoryGraph(root, id);
+    if (!graph) return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+    return new Response(exportInk(graph), {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": attachmentDisposition(`${id}.ink`),
+      },
+    });
+  });
+
+  app.get("/api/v1/projects/:id/export/html", async (c) => {
+    const id = c.req.param("id");
+    if (!isSafeBookId(id)) return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    const graph = await loadStoryGraph(root, id);
+    if (!graph) return c.json({ error: { code: "NOT_FOUND", message: `story graph not found for ${id}` } }, 404);
+    const assetDataUris: Record<string, string> = {};
+    for (const node of graph.nodes) {
+      const ref = node.imageSlot?.assetRef;
+      if (!ref || assetDataUris[ref]) continue;
+      try {
+        const file = resolveProjectImageFile(root, ref);
+        const buf = await readFile(file.resolved);
+        assetDataUris[ref] = `data:${file.contentType};base64,${buf.toString("base64")}`;
+      } catch (err) {
+        console.warn(`[studio] export/html: skipping assetRef "${ref}" —`, err);
+      }
+    }
+    return new Response(buildPlayableHtml(graph, { assetDataUris }), {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Disposition": attachmentDisposition(`${id}.html`),
+      },
+    });
+  });
+
+  app.post("/api/v1/projects/:id/nodes/:nodeId/image", async (c) => {
+    const id = c.req.param("id");
+    const nodeId = c.req.param("nodeId");
+    if (!isSafeBookId(id)) {
+      return c.json({ error: { code: "INVALID_ID", message: `invalid project id: ${id}` } }, 400);
+    }
+    const graph = await loadStoryGraph(root, id);
+    const node = graph?.nodes.find((n) => n.id === nodeId);
+    if (!node) {
+      return c.json({ error: { code: "NODE_NOT_FOUND", message: `node ${nodeId} not found` } }, 404);
+    }
+    const deps = overrides.nodeImageGenerator ?? (await defaultNodeImageDeps(root));
+    const { assetRef, delta } = await generateNodeImage({ projectRoot: root, projectId: id, node, deps });
+    const { rev } = await applyGraphDelta({ projectRoot: root, projectId: id, delta });
+    return c.json({ assetRef, rev });
   });
 
   return app;

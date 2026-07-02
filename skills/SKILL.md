@@ -1,13 +1,13 @@
 ---
 name: inkos
-description: Local AI fiction creation system with Studio Chat, CLI, and TUI - use for long-form novel writing, standalone short-fiction packages, cover generation, open-world / branching interactive fiction, fan fiction, spinoffs, style imitation, chapter continuation/import, EPUB export, AIGC detection, and project analytics. Native English support with 10 built-in English genre profiles (LitRPG, Progression Fantasy, Isekai, Cultivation, System Apocalypse, Dungeon Core, Romantasy, Sci-Fi, Tower Climber, Cozy Fantasy). Also supports Chinese web novel genres (xuanhuan, xianxia, urban, horror, other). Includes governed context assembly, protected/compressible context budgeting, chapter planning, writing, audit/revision, persistent world/truth state, multi-model routing, cover/image services, custom OpenAI-compatible providers, and InkOS Studio web UI for visual book management, Short runs, Play worlds, cover generation, chapter review, market radar, and analytics.
-version: 2.4.0
+description: Story Creation AI Agent with Studio Chat, CLI, and TUI - use for long-form novels, standalone short fiction, scripts, storyboards, interactive-film projects, open-world / branching play, fan fiction, spinoffs, style imitation, continuations, covers, EPUB export, AIGC detection, and project analytics. Includes runtime skills, traceable web research, governed context assembly, protected/compressible context budgeting, persistent story state, multi-model routing, cover/image services, custom OpenAI-compatible providers, and InkOS Studio web UI.
+version: 2.5.0
 metadata: { "openclaw": { "emoji": "📖", "requires": { "bins": ["inkos", "node"], "env": ["OPENAI_API_KEY"] }, "primaryEnv": "OPENAI_API_KEY", "homepage": "https://github.com/Narcooo/inkos", "install": [{ "id": "npm", "kind": "node", "package": "@actalk/inkos", "label": "Install InkOS (npm)" }] } }
 ---
 
 # InkOS - Story Creation AI Agent
 
-InkOS is a story creation AI agent for long-form novels, short fiction, scripts, fan works, continuations, covers, and open-world / branching interactive play. Prefer the Studio Chat / action-surface workflow for natural-language requests: the model proposes or invokes typed actions, InkOS executes them, and completion is derived from real tool results and files, not from prose claims.
+InkOS is a story creation AI agent for long-form novels, short fiction, scripts, storyboards, interactive-film projects, fan works, continuations, covers, and open-world / branching interactive play. Prefer the Studio Chat / action-surface workflow for natural-language requests: the model proposes or invokes typed actions, InkOS executes them, and completion is derived from real tool results and files, not from prose claims.
 
 Long-form writing still uses the chapter pipeline internally:
 - **Input governance**: Architect / Planner / Composer preserve author intent, current focus, outline sections, and relevant truth files instead of injecting everything blindly.
@@ -16,7 +16,7 @@ Long-form writing still uses the chapter pipeline internally:
 
 Truth files are persisted as schema-validated JSON (`story/state/*.json`) with markdown projections for human readability. SQLite temporal memory database (`story/memory.db`) enables relevance-based retrieval on Node 22+.
 
-## v1.5.0 Mental Model
+## v1.6.0 Mental Model
 
 Treat InkOS as a confirmable action system, not a bag of prompt shortcuts.
 
@@ -25,10 +25,13 @@ Treat InkOS as a confirmable action system, not a bag of prompt shortcuts.
 - Use `short_fiction_run` only for a standalone short-fiction package.
 - Use `generate_cover` only for cover generation/regeneration.
 - Use `play_start` / `play_step` for Open World or Branching Interactive sessions.
+- Use script / storyboard / interactive-film tools only for production artifacts that should be saved and exported, not for casual discussion.
+- Use `research_web` only when the user explicitly asks for external facts, market references, era/profession details, or worldbuilding research. Research reports are reference material and do not automatically mutate canon or prose.
 - Use long-form chapter tools only for existing long-form books.
+- Runtime skills provide professional rules, prompt packs, and context requirements. They do not grant new file, network, image, or writing permissions by themselves.
 - Context is governed: protected facts and current intent should not be silently compressed away; compressible history may be summarized when the context budget is tight.
 
-v1.5 broadly improves instruction following, context management, weak-model formatting resilience, and error separation between InkOS execution, provider calls, and image generation. Still surface unresolved audit issues plainly instead of claiming they were fixed.
+v1.6 adds interactive-film production, runtime skills, traceable web research, and stability fixes for targeted chapter edits, chapter index preservation, and model/service switching. Still surface unresolved audit issues plainly instead of claiming they were fixed.
 
 ## When to Use InkOS
 
@@ -42,6 +45,10 @@ v1.5 broadly improves instruction following, context management, weak-model form
 - **Standalone short fiction**: Generate a complete short-fiction package with outline, draft, review artifacts, synopsis, selling points, and optional cover image
 - **Cover generation**: Generate or regenerate only a cover prompt and cover image from a title, synopsis, or visual direction without rerunning story writing
 - **Interactive worlds**: Start Open World or Branching Interactive sessions with world contracts, character agents, inventory/evidence/relationship state, guided choices, free actions, and optional image generation
+- **Interactive-film projects**: Create playable branch graphs, variables/flags, relationship state, endings, node images, and exportable interactive project packages
+- **Scripts and storyboards**: Convert ideas, outlines, or prose into script/storyboard deliverables while preserving user format choices
+- **Runtime skills**: Load built-in or project-local skills, allow Chat to auto-select them, or force a skill with `@skill-id`
+- **Traceable web research**: Create sourced Markdown reports for facts, era/profession details, markets, and worldbuilding references
 - **Quality auditing**: Detect AI-generated content and perform 33-dimension quality checks
 - **Genre exploration**: Explore trends and create custom genre rules
 - **Analytics**: Track word count, audit pass rate, and issue distribution per book
@@ -424,6 +431,56 @@ For tool-using agents:
 - If the user changes world rules, persona, visual contract, or character behavior, treat it as a world-state edit or a new instruction for the next step, not as long-form chapter writing.
 - If image generation is configured, let Play generate scene / character / item / evidence images through the Play image path. Do not call the short-fiction cover tool for Play scene images.
 
+### Workflow 18: Runtime Skills
+
+Use this when the user wants reusable professional rules, a domain-specific writing mode, or a forced capability for the current Chat turn.
+
+Project-local skills live at:
+
+```text
+.inkos/skills/<skill-id>/SKILL.md
+```
+
+External skill directories can be loaded with:
+
+```bash
+export INKOS_SKILL_DIRS=/abs/path/to/skills
+```
+
+Guidelines for agent orchestration:
+- Let InkOS auto-select skills when the user gives a natural request such as "make this a detective evidence-chain open world".
+- Force a skill by including `@skill-id` in the user message when the user explicitly chooses one.
+- Treat skills as expertise packets: they can add rules, prompt packs, context needs, and retrieval guidance.
+- Do not treat skills as permissions. File edits, book creation, chapter writing, image generation, and exports still require the normal InkOS tools and confirmation gates.
+
+### Workflow 19: Traceable Web Research
+
+Use this when the user asks for real-world references, external facts, era/profession details, market references, or worldbuilding research.
+
+For tool-using agents, call `research_web` with:
+- `topic` — the research question
+- `purpose` — `worldbuilding`, `era`, `profession`, `market`, `fact-check`, or `general`
+- `depth` — optional: `quick`, `standard`, or `deep`
+
+The tool writes a Markdown report under:
+
+```text
+.inkos/research/
+```
+
+The report includes sources, claims, unknowns, conflicts, query logs, and confidence. It is reference material only. If research should change canon, wait for explicit user confirmation and then use the normal truth-file editing path.
+
+Search credentials are user/project supplied. Studio can configure a Tavily-compatible search API, or the server can use `TAVILY_API_KEY` from the environment.
+
+### Workflow 20: Script, Storyboard, and Interactive-Film Creation
+
+Use this when the user wants a production artifact rather than a casual answer:
+- Script: dramatic scenes, dialogue, acts, episode structure, or format-specific script drafts.
+- Storyboard: visual beats, shot descriptions, image prompts, and scene-by-scene production notes.
+- Interactive film: branch graph, choices, variables/flags, relationship state, endings, node images, and exportable project package.
+
+In Studio Chat, these actions should be proposed with a confirmation card first. After confirmation, InkOS writes the artifact and reports the saved files. Do not hand-write a fake "created" result in prose.
+
 ## InkOS Studio (Web Workbench)
 
 `inkos studio` launches a local web UI (default port 4567) that provides a visual interface for all InkOS operations:
@@ -431,6 +488,10 @@ For tool-using agents:
 - **Book management** — create, delete, export (TXT/MD/EPUB), configure per-book settings
 - **Short fiction & cover tools** — generate independent short-fiction packages, synopsis/selling points, cover prompts, and standalone covers
 - **Open World / Branching Interactive** — start and continue interactive worlds with world contracts, free actions, clickable choices, HUD state, and image generation
+- **Interactive-film workbench** — create and inspect branch nodes, variables/flags, endings, node images, and export packages
+- **Script / storyboard tools** — generate production-oriented script and storyboard files from ideas, prose, or reference notes
+- **Runtime Skill management** — list built-in skills, add project-local skills, edit `.inkos/skills/<id>/SKILL.md`, and force skills from Chat
+- **Research search provider** — configure external web search API credentials for `research_web`
 - **Chapter review & editing** — approve/reject drafts, edit content inline, multi-mode revision (polish/spot-fix/rewrite/anti-detect)
 - **Real-time writing progress** — SSE-based live updates during chapter generation
 - **Market radar** — AI-powered trend analysis with platform/genre recommendations
@@ -479,7 +540,7 @@ These tools are the preferred control surface for chapter steering:
   - Rewrites `story/current_focus.md`
   - Use for local steering over the next 1-3 chapters
 
-## Short Fiction, Cover, and Play Agent Tools
+## Creative, Research, and Play Agent Tools
 
 These are the preferred tools when InkOS is driven by OpenClaw, Studio chat, or `inkos agent`:
 
@@ -505,6 +566,16 @@ These are the preferred tools when InkOS is driven by OpenClaw, Studio chat, or 
   - Advances an existing Play run by one user action
   - Use for free-form actions such as "inspect the letter", "talk to the guard", "train for three days", or "choose option 2"
   - Do not use it to write the next chapter of a long-form book
+
+- `research_web`
+  - Collects external sources and writes a traceable Markdown research report
+  - Use only for explicit research/fact-check/worldbuilding/market requests
+  - Never mutate canon or prose directly from research output without explicit user confirmation
+
+- Script / storyboard / interactive-film creation tools
+  - Use when the user wants saved production artifacts
+  - Preserve the user's requested format, market, target audience, and export needs
+  - Do not use these tools for casual analysis unless the user asks to create deliverables
 
 `write_truth_file` remains available for broad file edits, but prefer the dedicated control tools above for input-governance changes.
 

@@ -1,7 +1,7 @@
 // Models
 export { type BookConfig, type Platform, type Genre, type BookStatus, type FanficMode, type WritingQualityForm, type WritingQualityIntensity, type WritingQualityProfile, BookConfigSchema, PlatformSchema, GenreSchema, BookStatusSchema, FanficModeSchema, WritingQualityFormSchema, WritingQualityIntensitySchema, WritingQualityProfileSchema, normalizePlatformId, normalizePlatformOrOther } from "./models/book.js";
 export { type ChapterMeta, type ChapterStatus, ChapterMetaSchema, ChapterStatusSchema } from "./models/chapter.js";
-export { type ProjectConfig, type LLMConfig, type NotifyChannel, type DetectionConfig, type QualityGates, type FoundationConfig, type WritingConfig, type AgentLLMOverride, type InputGovernanceMode, ProjectConfigSchema, LLMConfigSchema, AgentLLMOverrideSchema, DetectionConfigSchema, QualityGatesSchema, FoundationConfigSchema, WritingConfigSchema, InputGovernanceModeSchema } from "./models/project.js";
+export { type ProjectConfig, type LLMConfig, type NotifyChannel, type DetectionConfig, type QualityGates, type FoundationConfig, type WritingConfig, type AgentLLMOverride, type InputGovernanceMode, type ResearchSearchConfig, ProjectConfigSchema, LLMConfigSchema, AgentLLMOverrideSchema, DetectionConfigSchema, QualityGatesSchema, FoundationConfigSchema, WritingConfigSchema, InputGovernanceModeSchema, ResearchSearchConfigSchema } from "./models/project.js";
 export { type CurrentState, type ParticleLedger, type PendingHooks, type PendingHook, type LedgerEntry } from "./models/state.js";
 export { type GenreProfile, type ParsedGenreProfile, GenreProfileSchema, parseGenreProfile } from "./models/genre-profile.js";
 export { type BookRules, type ParsedBookRules, BookRulesSchema, parseBookRules, tryParseBookRulesFrontmatter } from "./models/book-rules.js";
@@ -136,6 +136,46 @@ export {
   RuleStackSchema,
   ChapterTraceSchema,
 } from "./models/input-governance.js";
+export {
+  BUILTIN_CAPABILITY_SKILLS,
+  BUILTIN_PROMPTS,
+  BUILTIN_PROMPT_PACKS,
+  CapabilitySkillManifestSchema,
+  PromptPackManifestSchema,
+  PromptPackPromptNotFoundError,
+  SkillContextNeedSchema,
+  SkillContextRetrievalSchema,
+  SkillContextTierSchema,
+  buildSkillContextPlan,
+  contextNeedById,
+  contextNeedPurpose,
+  createSkillRegistry,
+  getBuiltinPrompt,
+  listBuiltinPromptPacks,
+  listBuiltinPrompts,
+  loadExternalCapabilitySkills,
+  loadConfiguredCapabilitySkills,
+  loadPromptPackPrompt,
+  promptOverridePath,
+  type BuiltinPrompt,
+  type CapabilitySkillManifest,
+  type CreateSkillRegistryOptions,
+  type ExternalSkillDiagnostic,
+  type LoadedPromptPackPrompt,
+  type LoadExternalCapabilitySkillsInput,
+  type LoadExternalCapabilitySkillsResult,
+  type LoadPromptPackPromptInput,
+  type PromptPackManifest,
+  type PromptSource,
+  type SkillContextPlan,
+  type SkillContextPlanInput,
+  type SkillContextNeed,
+  type SkillContextRetrieval,
+  type SkillContextTier,
+  type SkillRegistry,
+  type SkillResolutionInput,
+  type SkillResolutionResult,
+} from "./skills/index.js";
 export { PlannerAgent, type PlanChapterInput, type PlanChapterOutput } from "./agents/planner.js";
 export {
   ComposerAgent,
@@ -180,6 +220,7 @@ export {
   InteractiveFilmCreateActionPayloadSchema,
   PlayStartActionPayloadSchema,
   RequestedIntentSchema,
+  SkillIdSchema,
   ScriptCreateActionPayloadSchema,
   ScriptTargetFormatSchema,
   ShortRunActionPayloadSchema,
@@ -189,6 +230,7 @@ export {
   type RequestedIntent,
   normalizeActionSource,
   normalizeActionPayload,
+  normalizeSkillIdList,
   normalizeRequestedIntent,
   normalizePlayMode,
   isExplicitWriteChapterCommand,
@@ -414,6 +456,13 @@ export * from "./prompts/index.js";
 // Utils
 export { isNewLayoutBook, isBookFoundationComplete } from "./utils/outline-paths.js";
 export { fetchUrl, searchWeb } from "./utils/web-search.js";
+export {
+  runResearchReport,
+  type ResearchDepth,
+  type ResearchInput,
+  type ResearchPurpose,
+  type ResearchReport,
+} from "./agents/researcher.js";
 export { filterHooks, filterSummaries, filterSubplots, filterEmotionalArcs, filterCharacterMatrix } from "./utils/context-filter.js";
 export { extractPOVFromOutline, filterMatrixByPOV, filterHooksByPOV } from "./utils/pov-filter.js";
 export { ConsolidatorAgent } from "./agents/consolidator.js";
@@ -554,3 +603,98 @@ export {
   requireCurrentUser,
   type UserContext,
 } from "./auth/user-context.js";
+
+// ── Interactive Film (story graph) ──
+export {
+  StoryGraphSchema,
+  StoryNodeSchema,
+  ChoiceSchema,
+  VariableSchema,
+  EndingSchema,
+  ConditionSchema,
+  EffectSchema,
+  type StoryGraph,
+  type StoryNode,
+  type Choice,
+  type Variable,
+  type Ending,
+  type Condition,
+  type Effect,
+  type VarValue,
+  type NodeType,
+} from "./interactive-film/graph-schema.js";
+export {
+  evaluateCondition,
+  applyEffects,
+  visibleChoices,
+  initVarState,
+  type VarState,
+} from "./interactive-film/evaluator.js";
+export {
+  validateStoryGraph,
+  reviewStoryGraph,
+  type ValidationReport,
+  type ValidationIssue,
+} from "./interactive-film/validation.js";
+export {
+  loadStoryGraph,
+  saveStoryGraph,
+  storyGraphPath,
+} from "./interactive-film/graph-store.js";
+export {
+  generateStoryGraph,
+  buildStoryGraphFromLLMText,
+  extractJson,
+  type GenerateStoryGraphInput,
+} from "./interactive-film/generate.js";
+export {
+  WorldAnchorSchema,
+  CharacterSchema,
+  VoiceProfileSchema,
+  type WorldAnchor,
+  type Character,
+  type VoiceProfile,
+} from "./interactive-film/graph-schema.js";
+export {
+  StoryGraphDeltaSchema,
+  applyStoryGraphDelta,
+  type StoryGraphDelta,
+} from "./interactive-film/delta.js";
+export {
+  applyGraphDelta,
+  loadAuthoringState,
+  revertToSnapshot,
+  authoringStatePath,
+  type AuthoringState,
+} from "./interactive-film/authoring-store.js";
+export {
+  buildWorldAnchorDelta,
+  buildAddVariableDelta,
+  buildDefineEndingDelta,
+  buildRemoveNodeDelta,
+  buildConnectChoiceDelta,
+  buildUpsertCharactersDelta,
+} from "./interactive-film/authoring-tools.js";
+export { writeCharacterFacts, readCharacterVoices } from "./interactive-film/memory-link.js";
+export {
+  buildFillNodeDeltaFromLLMText,
+  buildStructureDeltaFromLLMText,
+} from "./interactive-film/authoring-generate.js";
+export { summarizeStoryGraph, buildFilmAuthoringContext } from "./interactive-film/film-context.js";
+export {
+  generateNodeImage,
+  defaultNodeImageDeps,
+  type NodeImageDeps,
+} from "./interactive-film/node-image.js";
+export {
+  enumerateRuntimePaths,
+  type RuntimePath,
+} from "./interactive-film/paths.js";
+export {
+  emotionScore,
+  nodeEmotion,
+  analyzeEmotionalArcs,
+  analyzePathDistribution,
+} from "./interactive-film/emotion.js";
+export { exportInk } from "./interactive-film/export-ink.js";
+export { buildPlayableHtml } from "./interactive-film/export-html.js";

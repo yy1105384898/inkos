@@ -1,6 +1,6 @@
 {
   "name": "yangyang-novel-agent",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "YANGYANG 小说 Agent — secondary development of InkOS for a cloud Studio novel writing agent",
   "keywords": [

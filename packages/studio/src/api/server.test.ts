@@ -306,6 +306,10 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
     normalizeActionPayload: actual.normalizeActionPayload,
     normalizePlayMode: actual.normalizePlayMode,
     normalizeRequestedIntent: actual.normalizeRequestedIntent,
+    normalizeSkillIdList: actual.normalizeSkillIdList,
+    createSkillRegistry: actual.createSkillRegistry,
+    loadConfiguredCapabilitySkills: actual.loadConfiguredCapabilitySkills,
+    CapabilitySkillManifestSchema: actual.CapabilitySkillManifestSchema,
   };
 });
 

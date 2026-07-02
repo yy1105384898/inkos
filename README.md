@@ -25,11 +25,30 @@
   <a href="README.en.md">English</a> | 中文 | <a href="README.ja.md">日本語</a>
 </p>
 
+<p align="center">
+  <strong>InkOS 网页版上线！</strong>
+  <a href="https://huohuaapi.com/apps">立刻体验</a>
+</p>
+
 ---
 
-YANGYANG 小说 Agent 是基于 InkOS 二次开发的中文小说创作 Agent，云服务器统一保存书籍、章节、聊天记录和封面成果；模型 API 地址、文本 Key、生图 Key 默认只保存在当前浏览器。它可以自主写小说——写、审、改，全程接管。覆盖玄幻、仙侠、都市、科幻等多种风格，支持续写、番外、同人、仿写等创作形式。人工审核门控确保你始终掌控全局。
+YANGYANG 小说 Agent 是基于 InkOS 二次开发的中文小说创作 Agent，云服务器统一保存书籍、章节、聊天记录、模型配置、封面配置和创作成果，并按登录用户隔离。它可以自主写小说——写、审、改，全程接管。覆盖玄幻、仙侠、都市、科幻等多种风格，支持续写、番外、同人、仿写、互动影游等创作形式。人工审核门控确保你始终掌控全局。
 
 
+## v1.6.0 - 互动影游与 Skill 系统
+
+InkOS 1.6.0 把开放世界继续推进到互动影游、剧本和分镜工作台，同时引入可插拔 Skill 系统：专业能力可以被 Chat 自动调用，也可以由用户强制指定。写作、互动、研究和导出继续共享同一套 action surface，重动作确认后再执行，产物可以在 Studio 内查看和导出。
+
+- **互动影游**：新增分支剧情、变量 / 旗标、角色关系、结局、节点图片和交互项目导出，适合做互动剧、互动影游和多结局脚本。
+- **Skill 系统**：支持内置 / 外部 skill，为长篇、短篇、Play、剧本、分镜等入口注入专业规则、提示词包和上下文需求。
+- **联网研究**：新增 `research_web`，用于世界观、职业、年代、市场和事实核查，生成带来源、查询记录和可信度的 Markdown 参考报告。
+- **协作编辑稳定性**：局部章节编辑、章节索引恢复、多渠道模型切换后的 bookId 传递都补了回归保护。
+
+<p align="center">
+  <img src="assets/interactive-film-e2e.png" width="900" alt="InkOS 互动影游剧情树实测截图">
+</p>
+
+## v1.5.0 - InkOS Play 发布，开放世界，用想象力游玩
 
 **v1.4.0 短篇写作与 Studio Chat 协作更新** — Studio Chat 和 CLI 现在可以生成独立短篇、简介卖点和封面提示词 / 封面图；普通聊天支持持久化 session，生成物可直接预览和编辑；Studio 模型配置内置 [yynewapi](https://yynewapi.yangyangnj.top/) ，方便接入全球主流模型聚合服务。
 
@@ -53,7 +72,7 @@ YANGYANG 小说 Agent 是基于 InkOS 二次开发的中文小说创作 Agent，
 > 欢迎加群反馈问题、提出需求，也欢迎关注项目动态 — 我们的目标是做最强的基于小说的内容生态创作 AI Agent。
 
 <p align="center">
-  <img src="assets/IMG_1503.JPG" width="300" alt="微信交流群">
+  <img src="assets/wechat-group-v23.jpg" width="300" alt="微信交流群">
 </p>
 
 ## 快速开始
@@ -89,6 +108,38 @@ inkos interact --json --message "继续当前书，但把节奏再收紧一点"
 - recent events
 
 `plan chapter` / `compose chapter` / `draft` / `audit` / `revise` / `write next` 这些原子命令仍然保留，但更适合作为底层工具，而不是 OpenClaw 的首选入口。也可以在 [ClawHub](https://clawhub.ai) 搜索 `inkos` 在线查看。
+
+### InkOS 运行时 Skill
+
+这里的 skill 指 InkOS Chat/Play/长篇写作内部可使用的专业能力包，和上面的 ClawHub Skill 不是同一个概念。它不会给模型额外执行权限，只提供专业规则、上下文需求和 prompt pack；创建、写入、编辑、生成图片仍然走 Studio 的工具权限和确认闸门。
+
+可用方式：
+
+- 在项目目录放置 `.inkos/skills/<skill-id>/SKILL.md`，Studio Chat 会在运行时自动加载。
+- 或设置 `INKOS_SKILL_DIRS=/abs/path/to/skills`，可指向单个 skill 目录，也可指向包含多个 skill 子目录的目录。多个目录按系统分隔符分隔。
+- 在 Chat 里用 `@skill-id` 强制本轮使用，例如：`@detective-play 做一个证据链驱动的开放世界`。
+- 不写 `@skill-id` 时，系统会根据 session 类型和触发词自动选择内置 skill，例如长篇、开放世界、互动影游。
+
+最小 `SKILL.md` 示例：
+
+```md
+---
+id: detective-play
+name: Detective Play
+description: Detective evidence and suspect-board play.
+whenToUse: Use for open-world detective play and evidence ledgers.
+triggers: [侦探, evidence]
+sessionKinds: [play]
+contextNeeds:
+  - id: evidence-ledger
+    purpose: Preserve suspect, clue, and evidence chain state.
+    sources: [world/evidence.md]
+    tier: protected
+    appliesTo: [play_step]
+    retrieval: semantic
+---
+Use evidence chains; do not turn clues into generic atmosphere.
+```
 
 ### 配置
 

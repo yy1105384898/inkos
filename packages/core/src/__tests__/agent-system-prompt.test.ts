@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildAgentSystemPrompt } from "../agent/agent-system-prompt.js";
+import { createSkillRegistry } from "../skills/index.js";
 
 describe("buildAgentSystemPrompt", () => {
   describe("mode isolation", () => {
@@ -79,6 +80,47 @@ describe("buildAgentSystemPrompt", () => {
       expect(enPrompt).toContain("style imitation/style analysis/reference-style/prose mimicry=style_imitation");
       expect(enPrompt).toContain("Do not answer by asking for a title/source text/parent-book path");
       expect(enPrompt).toContain("side-story/spinoff/canon-materials=spinoff_create");
+    });
+
+    it("adds forced skill guidance without granting execution authority", () => {
+      const skills = createSkillRegistry().resolveSkills({
+        requestedSkills: ["open-world-play"],
+        sessionKind: "chat",
+      });
+
+      const prompt = buildAgentSystemPrompt(null, "zh", "chat", { skills });
+
+      expect(prompt).toContain("## Skill 指导");
+      expect(prompt).toContain("open-world-play (强制)");
+      expect(prompt).toContain("Skill 只提供专业指导、上下文需求和 prompt pack");
+      expect(prompt).toContain("它不授予执行权限");
+      expect(prompt).toContain("play.start");
+    });
+
+    it("includes the selected skill body as active guidance", () => {
+      const skills = createSkillRegistry({
+        skills: [{
+          id: "detective-play",
+          name: "Detective Play",
+          description: "Detective evidence play.",
+          whenToUse: "Use for detective evidence chains.",
+          triggers: ["侦探"],
+          sessionKinds: ["play"],
+          promptPacks: [],
+          toolHints: [],
+          contextNeeds: [],
+          body: "Evidence must form a recoverable chain; never turn clues into generic atmosphere.",
+          source: "external",
+        }],
+      }).resolveSkills({
+        requestedSkills: ["detective-play"],
+        sessionKind: "chat",
+      });
+
+      const prompt = buildAgentSystemPrompt(null, "en", "chat", { skills });
+
+      expect(prompt).toContain("detective-play (forced)");
+      expect(prompt).toContain("Evidence must form a recoverable chain");
     });
   });
 

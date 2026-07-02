@@ -103,6 +103,7 @@ export interface GeneratedArtifactDetails {
   readonly specPath?: string;
   readonly scriptPath?: string;
   readonly storyboardPath?: string;
+  readonly storyGraphPath?: string;
   readonly storyTreePath?: string;
   readonly flagsPath?: string;
   readonly imagePromptsPath?: string;
@@ -210,6 +211,7 @@ export function getGeneratedArtifactDetails(exec: ToolExecution): GeneratedArtif
     specPath: stringField(record, "specPath"),
     scriptPath: stringField(record, "scriptPath"),
     storyboardPath: stringField(record, "storyboardPath"),
+    storyGraphPath: stringField(record, "storyGraphPath"),
     storyTreePath: stringField(record, "storyTreePath"),
     flagsPath: stringField(record, "flagsPath"),
     imagePromptsPath: stringField(record, "imagePromptsPath"),
@@ -217,7 +219,7 @@ export function getGeneratedArtifactDetails(exec: ToolExecution): GeneratedArtif
   };
 }
 
-function ScriptStoryboardResultPreview({ exec }: { exec: ToolExecution }) {
+function ScriptStoryboardResultPreview({ exec, onOpenFilmStudio }: { exec: ToolExecution; onOpenFilmStudio?: (projectId: string) => void }) {
   const openProjectArtifact = useChatStore((s) => s.openProjectArtifact);
   if (!["script_create", "storyboard_create", "interactive_film_create"].includes(exec.tool) || exec.status !== "completed") return null;
   const details = getGeneratedArtifactDetails(exec);
@@ -226,37 +228,54 @@ function ScriptStoryboardResultPreview({ exec }: { exec: ToolExecution }) {
     && details.kind !== "storyboard_created"
     && details.kind !== "interactive_film_created"
   )) return null;
-  const rows: Array<readonly [string, string]> = [];
-  if (details.specPath) rows.push(["规格", details.specPath]);
-  if (details.storyTreePath) rows.push(["剧情树", details.storyTreePath]);
-  if (details.flagsPath) rows.push(["变量旗标", details.flagsPath]);
-  if (details.scriptPath) rows.push(["剧本", details.scriptPath]);
-  if (details.storyboardPath) rows.push(["分镜", details.storyboardPath]);
-  if (details.imagePromptsPath) rows.push(["图像提示词", details.imagePromptsPath]);
-  if (details.assetsManifestPath) rows.push(["图片资产", details.assetsManifestPath]);
-  if (rows.length === 0) return null;
+  const maybeRows: Array<readonly [string, string] | null> = [
+    details.specPath ? ["规格", details.specPath] : null,
+    details.storyGraphPath ? ["剧情图谱", details.storyGraphPath] : null,
+    details.storyTreePath ? ["剧情树", details.storyTreePath] : null,
+    details.flagsPath ? ["变量旗标", details.flagsPath] : null,
+    details.scriptPath ? ["剧本", details.scriptPath] : null,
+    details.storyboardPath ? ["分镜", details.storyboardPath] : null,
+    details.imagePromptsPath ? ["图像提示词", details.imagePromptsPath] : null,
+    details.assetsManifestPath ? ["图片资产", details.assetsManifestPath] : null,
+  ];
+  const rows = maybeRows.filter((row): row is readonly [string, string] => Boolean(row));
+  if (rows.length === 0 && !(details.kind === "interactive_film_created" && details.projectId)) return null;
   return (
     <div className="mx-3 mb-3 mt-1 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5">
-      <div className="text-[16px] leading-6 font-semibold text-primary">
-        {details.kind === "script_created" ? "剧本已生成" : details.kind === "storyboard_created" ? "分镜已生成" : "互动影游已生成"}
-      </div>
-      <div className="mt-2 space-y-1.5">
-        {rows.map(([label, path]) => (
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[16px] leading-6 font-semibold text-primary">
+          {details.kind === "script_created" ? "剧本已生成" : details.kind === "storyboard_created" ? "分镜已生成" : "互动影游已生成"}
+        </div>
+        {details.kind === "interactive_film_created" && details.projectId && onOpenFilmStudio && (
           <button
-            key={label}
             type="button"
-            onClick={() => openProjectArtifact(path)}
-            className="group flex w-full items-start justify-between gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left transition hover:border-primary/25 hover:bg-background/65"
+            data-testid="open-film-studio"
+            onClick={() => onOpenFilmStudio(details.projectId!)}
+            className="shrink-0 rounded-lg bg-primary px-3 py-1 text-[13px] font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
-            <span className="min-w-0 text-[13px] leading-5 text-muted-foreground break-all">
-              <span className="font-medium text-foreground">{label}：</span>{path}
-            </span>
-            <span className="mt-0.5 shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary opacity-80 transition group-hover:opacity-100">
-              查看
-            </span>
+            打开创作向导 →
           </button>
-        ))}
+        )}
       </div>
+      {rows.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {rows.map(([label, path]) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => openProjectArtifact(path)}
+              className="group flex w-full items-start justify-between gap-3 rounded-lg border border-transparent px-2 py-1.5 text-left transition hover:border-primary/25 hover:bg-background/65"
+            >
+              <span className="min-w-0 text-[13px] leading-5 text-muted-foreground break-all">
+                <span className="font-medium text-foreground">{label}：</span>{path}
+              </span>
+              <span className="mt-0.5 shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary opacity-80 transition group-hover:opacity-100">
+                查看
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -514,6 +533,7 @@ function ProposedActionPreview({
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
+            data-testid="confirm-action"
             onClick={() => onProposedAction?.(details)}
             disabled={!onProposedAction || streaming || locked}
             className="rounded-lg bg-primary px-3.5 py-2 text-[15px] leading-6 font-medium text-primary-foreground disabled:opacity-50"
@@ -610,10 +630,12 @@ function PipelineExecution({
   exec,
   onProposedAction,
   onRejectProposedAction,
+  onOpenFilmStudio,
 }: {
   exec: ToolExecution;
   onProposedAction?: (details: ProposedActionDetails) => void;
   onRejectProposedAction?: (details: ProposedActionDetails) => void;
+  onOpenFilmStudio?: (projectId: string) => void;
 }) {
   const isActive = exec.status === "running" || exec.status === "processing";
   const [open, setOpen] = useState(isActive);
@@ -654,7 +676,7 @@ function PipelineExecution({
         onRejectProposedAction={onRejectProposedAction}
       />
       <ShortFictionResultPreview exec={exec} />
-      <ScriptStoryboardResultPreview exec={exec} />
+      <ScriptStoryboardResultPreview exec={exec} onOpenFilmStudio={onOpenFilmStudio} />
       <PlayResultPreview exec={exec} />
       <PlayEditPreview exec={exec} />
       {typeof exec.result === "string" && exec.result.trim() && (
@@ -756,6 +778,7 @@ export interface ToolExecutionStepsProps {
   executions: ToolExecution[];
   onProposedAction?: (details: ProposedActionDetails) => void;
   onRejectProposedAction?: (details: ProposedActionDetails) => void;
+  onOpenFilmStudio?: (projectId: string) => void;
 }
 
 /**
@@ -789,7 +812,7 @@ export function groupToolExecutionsChronologically(executions: ToolExecution[]):
   return groups;
 }
 
-export const ToolExecutionSteps = memo(function ToolExecutionSteps({ executions, onProposedAction, onRejectProposedAction }: ToolExecutionStepsProps) {
+export const ToolExecutionSteps = memo(function ToolExecutionSteps({ executions, onProposedAction, onRejectProposedAction, onOpenFilmStudio }: ToolExecutionStepsProps) {
   const groups = useMemo(() => groupToolExecutionsChronologically(executions), [executions]);
 
   return (
@@ -802,6 +825,7 @@ export const ToolExecutionSteps = memo(function ToolExecutionSteps({ executions,
                 exec={g.exec}
                 onProposedAction={onProposedAction}
                 onRejectProposedAction={onRejectProposedAction}
+                onOpenFilmStudio={onOpenFilmStudio}
               />
             )
           : <UtilityToolsGroup key={`utils-${i}`} execs={g.execs} />
