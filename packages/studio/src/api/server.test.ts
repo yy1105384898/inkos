@@ -30,6 +30,7 @@ const createInteractionToolsFromDepsMock = vi.fn(() => ({}));
 const loadProjectSessionMock = vi.fn();
 const resolveSessionActiveBookMock = vi.fn();
 const runAgentSessionMock = vi.fn();
+const abortAgentSessionMock = vi.fn();
 const playRunnerStepMock = vi.fn();
 const playRunnerCtorArgs: unknown[] = [];
 const generatePlayImageMock = vi.fn();
@@ -45,6 +46,7 @@ const resolveServiceModelMock = vi.fn();
 const loadSecretsMock = vi.fn();
 const saveSecretsMock = vi.fn();
 const getServiceApiKeyMock = vi.fn();
+const createLLMTranslationModelMock = vi.fn();
 type ServicePresetMock = {
   providerFamily: "openai" | "anthropic";
   baseUrl: string;
@@ -250,6 +252,7 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
     loadProjectSession: loadProjectSessionMock,
     resolveSessionActiveBook: resolveSessionActiveBookMock,
     runAgentSession: runAgentSessionMock,
+    abortAgentSession: abortAgentSessionMock,
     createSubAgentTool: actual.createSubAgentTool,
     createShortFictionRunTool: actual.createShortFictionRunTool,
     createGenerateCoverTool: actual.createGenerateCoverTool,
@@ -310,6 +313,13 @@ vi.mock("@actalk/inkos-core", async (importOriginal) => {
     createSkillRegistry: actual.createSkillRegistry,
     loadConfiguredCapabilitySkills: actual.loadConfiguredCapabilitySkills,
     CapabilitySkillManifestSchema: actual.CapabilitySkillManifestSchema,
+    createTranslationCreateTool: actual.createTranslationCreateTool,
+    createLLMTranslationModel: createLLMTranslationModelMock,
+    createTranslationProjectFromFile: actual.createTranslationProjectFromFile,
+    loadTranslationChapter: actual.loadTranslationChapter,
+    loadTranslationManifest: actual.loadTranslationManifest,
+    runTranslationProject: actual.runTranslationProject,
+    writeTranslationExport: actual.writeTranslationExport,
   };
 });
 
@@ -445,6 +455,21 @@ describe("createStudioServer daemon lifecycle", () => {
     });
     createLLMClientMock.mockReset();
     createLLMClientMock.mockReturnValue({});
+    createLLMTranslationModelMock.mockReset();
+    createLLMTranslationModelMock.mockReturnValue({
+      translateSegments: vi.fn(async (request: { readonly segments: ReadonlyArray<{ readonly index: number; readonly source: string }> }) => ({
+        segments: request.segments.map((segment) => ({
+          index: segment.index,
+          target: `Translated: ${segment.source}`,
+        })),
+        glossary: [],
+      })),
+      reviewChapter: vi.fn(async () => ({
+        passed: true,
+        summary: "OK",
+        issues: [],
+      })),
+    });
     chatCompletionMock.mockReset();
     chatCompletionMock.mockResolvedValue({
       content: "pong",
@@ -512,6 +537,7 @@ describe("createStudioServer daemon lifecycle", () => {
     rollbackToChapterMock.mockResolvedValue([]);
     pipelineConfigs.length = 0;
     runAgentSessionMock.mockReset();
+    abortAgentSessionMock.mockReset();
     playRunnerStepMock.mockReset();
     playRunnerCtorArgs.length = 0;
     playRunnerStepMock.mockResolvedValue({
@@ -583,7 +609,7 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(vi.isMockFunction(isSafeBookId)).toBe(false);
     expect(isSafeBookId("demo-book")).toBe(true);
     expect(isSafeBookId("demo/book")).toBe(false);
-  }, 10_000);
+  }, 60_000);
 
   it("returns from /api/daemon/start before the first write cycle finishes", async () => {
     let resolveStart: (() => void) | undefined;
@@ -612,7 +638,7 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(status.json()).resolves.toEqual({ running: true });
 
     resolveStart?.();
-  }, 10_000);
+  }, 60_000);
 
   it("rejects book routes with path traversal ids", async () => {
     const { createStudioServer } = await import("./server.js");
@@ -1552,6 +1578,68 @@ describe("createStudioServer daemon lifecycle", () => {
       error: expect.stringContaining("无法自动确定模型"),
     });
     expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns English probe errors when the project language is en", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      language: "en",
+      llm: {
+        configSource: "env",
+        services: [
+          { service: "custom", name: "MiniMax", baseUrl: "https://api.minimax.com/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "404 page not found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/custom%3AMiniMax/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "sk-minimax",
+        baseUrl: "https://api.minimax.com/v1",
+        apiFormat: "chat",
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Could not determine a model automatically"),
+    });
+  });
+
+  it("returns an English empty-API-key error when the project language is en", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      language: "en",
+    }, null, 2), "utf-8");
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/openai/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "" }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: "API Key must not be empty",
+    });
   });
 
   it("falls back to the detected/default model when custom /models is unavailable", async () => {
@@ -2601,6 +2689,20 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 
+  it("aborts a cached agent session through POST /api/v1/sessions/:sessionId/abort", async () => {
+    abortAgentSessionMock.mockReturnValueOnce(true);
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/sessions/agent-session-1/abort", {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(abortAgentSessionMock).toHaveBeenCalledWith(root, "agent-session-1");
+    await expect(response.json()).resolves.toEqual({ ok: true, aborted: true });
+  });
+
   it("routes /api/agent through runAgentSession and returns response + sessionId", async () => {
     runAgentSessionMock.mockImplementationOnce(async (config: { onEvent?: (event: unknown) => void }) => {
       config.onEvent?.({
@@ -2651,6 +2753,58 @@ describe("createStudioServer daemon lifecycle", () => {
       }),
       "检查当前状态",
     );
+  });
+
+  it("stores uploaded attachments and forwards them to the agent session", async () => {
+    const note = Buffer.from("# 参考资料\n主角必须保留第一人称。", "utf-8").toString("base64");
+    const image = Buffer.from("fakepng", "utf-8").toString("base64");
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instruction: "按附件继续讨论",
+        activeBookId: "demo-book",
+        sessionId: "agent-session-1",
+        attachments: [
+          {
+            id: "note-1",
+            filename: "brief.md",
+            mediaType: "text/markdown",
+            size: Buffer.byteLength(note, "base64"),
+            dataUrl: `data:text/markdown;base64,${note}`,
+          },
+          {
+            id: "img-1",
+            filename: "reference.png",
+            mediaType: "image/png",
+            size: Buffer.byteLength(image, "base64"),
+            dataUrl: `data:image/png;base64,${image}`,
+          },
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const agentConfig = runAgentSessionMock.mock.calls.at(-1)?.[0] as { attachments?: Array<Record<string, unknown>> };
+    expect(agentConfig.attachments).toHaveLength(2);
+    expect(agentConfig.attachments?.[0]).toMatchObject({
+      id: "note-1",
+      filename: "brief.md",
+      mimeType: "text/markdown",
+      text: "# 参考资料\n主角必须保留第一人称。",
+    });
+    expect(agentConfig.attachments?.[1]).toMatchObject({
+      id: "img-1",
+      filename: "reference.png",
+      mimeType: "image/png",
+      image: { data: image, mimeType: "image/png" },
+    });
+    const storedPath = agentConfig.attachments?.[0]?.storedPath;
+    expect(typeof storedPath).toBe("string");
+    await expect(access(join(root, storedPath as string))).resolves.toBeUndefined();
   });
 
   it("executes confirmed create-book action directly without asking the chat model to call tools", async () => {
@@ -2887,7 +3041,7 @@ describe("createStudioServer daemon lifecycle", () => {
       ]),
       "继续",
     );
-  }, 10_000);
+  }, 60_000);
 
   it("does not present audit-failed direct write-next as completed", async () => {
     writeNextChapterMock.mockResolvedValueOnce({
@@ -2942,7 +3096,7 @@ describe("createStudioServer daemon lifecycle", () => {
         },
       }),
     );
-  }, 10_000);
+  }, 60_000);
 
   it("does not direct-run write-next from ordinary free text", async () => {
     const { createStudioServer } = await import("./server.js");
@@ -2995,7 +3149,7 @@ describe("createStudioServer daemon lifecycle", () => {
     });
     expect(writeNextChapterMock).toHaveBeenCalledWith("demo-book");
     expect(runAgentSessionMock).not.toHaveBeenCalled();
-  }, 10_000);
+  }, 60_000);
 
   it("forwards playMode to runAgentSession for play sessions", async () => {
     const { createStudioServer } = await import("./server.js");
@@ -3891,7 +4045,7 @@ describe("createStudioServer daemon lifecycle", () => {
       },
     });
     expect(chatCompletionMock).not.toHaveBeenCalled();
-  }, 10_000);
+  }, 60_000);
 
   it("does not treat architect_incomplete as a created book", async () => {
     const orphanSession = {
@@ -4214,6 +4368,42 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(pipelineConfigs.at(-1)).toMatchObject({ chapterReviewMode: "manual" });
   });
 
+  it("uses a book-level revisionGate override when revising a chapter", async () => {
+    await writeCompleteBookFixture(root, "demo-book", "Demo Book");
+    const rawBookPath = join(root, "books", "demo-book", "book.json");
+    const rawBook = JSON.parse(await readFile(rawBookPath, "utf-8"));
+    await writeFile(rawBookPath, JSON.stringify({
+      ...rawBook,
+      writing: { revisionGate: "always" },
+    }, null, 2), "utf-8");
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/books/demo-book/revise/3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "spot-fix" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(pipelineConfigs.at(-1)).toMatchObject({ revisionGate: "always" });
+  });
+
+  it("defaults the revisionGate to strict when neither book nor project sets one", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/books/demo-book/revise/3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "spot-fix" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(pipelineConfigs.at(-1)).toMatchObject({ revisionGate: "strict" });
+  });
+
   it("exposes a global default model endpoint backed by llm.defaultModel", async () => {
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(cloneProjectConfig() as never, root);
@@ -4382,6 +4572,163 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(ok.json()).resolves.toMatchObject({ status: "creating", bookId: "仿写新书" });
     await vi.waitFor(() => expect(initImitationBookMock).toHaveBeenCalledTimes(1));
     expect(initImitationBookMock.mock.calls[0]?.[2]).toBe("一个原创故事");
+  });
+
+  it("uploads a translation source, creates a translation project, lists it, and exports markdown", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+    const source = "# 第一章 雨夜\n\n雨水落在旧码头。\n";
+    const dataUrl = `data:text/markdown;base64,${Buffer.from(source, "utf-8").toString("base64")}`;
+
+    const upload = await app.request("http://localhost/api/v1/translations/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: "source.md", dataUrl }),
+    });
+    expect(upload.status).toBe(200);
+    const uploaded = await upload.json() as { storedPath: string };
+    expect(uploaded.storedPath).toMatch(/^\.inkos\/uploads\/translation\//);
+
+    const create = await app.request("http://localhost/api/v1/translations/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filePath: uploaded.storedPath,
+        sourceLanguage: "zh",
+        targetLanguage: "en",
+        title: "Rain Translation",
+      }),
+    });
+    expect(create.status).toBe(200);
+    const created = await create.json() as { projectId: string; title: string; projectDir: string; manifest: { id: string; chapters: unknown[] } };
+    expect(created.projectId).toBe(created.manifest.id);
+    expect(created.title).toBe("Rain Translation");
+    expect(created.manifest.chapters).toHaveLength(1);
+
+    const list = await app.request("http://localhost/api/v1/translations");
+    await expect(list.json()).resolves.toMatchObject({
+      translations: [expect.objectContaining({ projectId: created.manifest.id, title: "Rain Translation" })],
+    });
+
+    const exported = await app.request(`http://localhost/api/v1/translations/${created.manifest.id}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format: "md" }),
+    });
+    expect(exported.status).toBe(200);
+    const exportedBody = await exported.json() as { outputPath: string; chaptersExported: number };
+    expect(exportedBody.chaptersExported).toBe(1);
+    await expect(access(exportedBody.outputPath)).resolves.toBeUndefined();
+  });
+
+  it("surfaces translation model failures without masking upstream provider errors", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+    const source = "# 第一章 雨夜\n\n雨水落在旧码头。\n";
+    const dataUrl = `data:text/markdown;base64,${Buffer.from(source, "utf-8").toString("base64")}`;
+
+    const upload = await app.request("http://localhost/api/v1/translations/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: "source.md", dataUrl }),
+    });
+    const uploaded = await upload.json() as { storedPath: string };
+
+    const create = await app.request("http://localhost/api/v1/translations/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filePath: uploaded.storedPath,
+        sourceLanguage: "自动识别",
+        targetLanguage: "英语",
+        title: "Rain Translation",
+      }),
+    });
+    const created = await create.json() as { projectId: string };
+    createLLMTranslationModelMock.mockReturnValueOnce({
+      translateSegments: vi.fn(async () => {
+        throw new Error("503 The model provider is temporarily unavailable.");
+      }),
+      reviewChapter: vi.fn(async () => ({
+        passed: true,
+        summary: "OK",
+        issues: [],
+      })),
+    });
+
+    const run = await app.request(`http://localhost/api/v1/translations/${created.projectId}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchSize: 8 }),
+    });
+
+    const body = await run.json();
+    expect({ status: run.status, body }).toMatchObject({
+      status: 502,
+      body: {
+      error: {
+        code: "TRANSLATION_RUN_FAILED",
+        message: expect.stringContaining("503 The model provider is temporarily unavailable."),
+      },
+      },
+    });
+  });
+
+  it("returns translated chapter text in translation detail for in-page review", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+    const source = "# 第一章 雨夜\n\n雨水落在旧码头。\n\n她把账本压进怀里。\n";
+    const dataUrl = `data:text/markdown;base64,${Buffer.from(source, "utf-8").toString("base64")}`;
+
+    const upload = await app.request("http://localhost/api/v1/translations/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: "source.md", dataUrl }),
+    });
+    const uploaded = await upload.json() as { storedPath: string };
+
+    const create = await app.request("http://localhost/api/v1/translations/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filePath: uploaded.storedPath,
+        sourceLanguage: "自动识别",
+        targetLanguage: "英语",
+        title: "Rain Translation",
+      }),
+    });
+    const created = await create.json() as { projectId: string };
+
+    const run = await app.request(`http://localhost/api/v1/translations/${created.projectId}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ batchSize: 8 }),
+    });
+    expect(run.status).toBe(200);
+
+    const detail = await app.request(`http://localhost/api/v1/translations/${created.projectId}`);
+    expect(detail.status).toBe(200);
+    await expect(detail.json()).resolves.toMatchObject({
+      chapters: [
+        {
+          number: 1,
+          title: "雨夜",
+          status: "reviewed",
+          segments: [
+            {
+              index: 1,
+              source: "雨水落在旧码头。",
+              target: "Translated: 雨水落在旧码头。",
+            },
+            {
+              index: 2,
+              source: "她把账本压进怀里。",
+              target: "Translated: 她把账本压进怀里。",
+            },
+          ],
+        },
+      ],
+    });
   });
 
 });

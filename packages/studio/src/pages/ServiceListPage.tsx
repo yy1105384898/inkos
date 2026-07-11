@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, Plus, Search, X } from "lucide-react";
-import { GROUP_DESCRIPTIONS, GROUP_LABELS, GROUP_ORDER, GROUP_SHORT_LABELS } from "../constants/service-groups";
+import { GROUP_ORDER, getGroupDescription, getGroupLabel, getGroupShortLabel } from "../constants/service-groups";
 import { fetchJson } from "../hooks/use-api";
 import { useServiceStore } from "../store/service";
 import type { EndpointGroup, ServiceInfo } from "../store/service";
@@ -372,7 +372,7 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
               ].join(" ")}
             >
               {selected && <Check size={12} />}
-              {GROUP_SHORT_LABELS[group]} {groupCounts[group]}
+              {getGroupShortLabel(group)} {groupCounts[group]}
             </button>
           );
         })}
@@ -410,11 +410,11 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
           <section key={group} className="space-y-3">
             <div className="space-y-1">
               <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
-                {GROUP_LABELS[group]}
+                {getGroupLabel(group)}
               </h2>
-              {GROUP_DESCRIPTIONS[group] && (
+              {getGroupDescription(group) && (
                 <p className="text-xs text-muted-foreground/60">
-                  {GROUP_DESCRIPTIONS[group]}
+                  {getGroupDescription(group)}
                 </p>
               )}
             </div>

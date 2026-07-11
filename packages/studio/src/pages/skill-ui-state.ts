@@ -21,6 +21,7 @@ export interface SkillDraft {
   readonly whenToUse: string;
   readonly triggers: string;
   readonly sessionKinds: string;
+  readonly promptPacks: string;
   readonly body: string;
 }
 
@@ -31,6 +32,7 @@ export interface SkillPayload {
   readonly whenToUse?: string;
   readonly triggers?: string[];
   readonly sessionKinds?: string[];
+  readonly promptPacks?: string[];
   readonly body?: string;
 }
 
@@ -42,6 +44,7 @@ export function createEmptySkillDraft(): SkillDraft {
     whenToUse: "",
     triggers: "",
     sessionKinds: "chat,book,short,play",
+    promptPacks: "",
     body: "",
   };
 }
@@ -82,6 +85,7 @@ export function skillDraftFromSkill(skill: StudioSkill): SkillDraft {
     whenToUse: skill.whenToUse ?? "",
     triggers: (skill.triggers ?? []).join(", "),
     sessionKinds: (skill.sessionKinds ?? []).join(", "),
+    promptPacks: (skill.promptPacks ?? []).join(", "),
     body: skill.body ?? "",
   };
 }
@@ -95,6 +99,7 @@ export function skillDraftToPayload(draft: SkillDraft, includeId = true): SkillP
     whenToUse: draft.whenToUse.trim(),
     triggers: splitSkillList(draft.triggers),
     sessionKinds: splitSkillList(draft.sessionKinds),
+    promptPacks: splitSkillList(draft.promptPacks),
     body: draft.body.trim(),
   };
 }

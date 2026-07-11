@@ -736,7 +736,15 @@ describe("agent deterministic writing tools", () => {
         fixedIssues: [],
         applied: false,
         status: "unchanged",
-        skippedReason: "Manual revision did not improve merged audit or AI-tell metrics; kept original chapter.",
+        skippedReason: "Manual revision kept original chapter: before blocking=2, critical=1, aiTell=3; after blocking=2, critical=1, aiTell=3.",
+        revisionDiagnostics: {
+          standard: "A revision is applied only when blocking, critical, and AI-tell counts do not worsen, and at least blocking or AI-tell issues improve.",
+          before: { blockingCount: 2, criticalCount: 1, aiTellCount: 3 },
+          after: { blockingCount: 2, criticalCount: 1, aiTellCount: 3 },
+          remainingIssues: [
+            { severity: "critical", category: "Chapter Memo Drift", description: "没有按用户要求重修本章。", suggestion: "重写主冲突。" },
+          ],
+        },
       })),
     };
     const tool = createSubAgentTool(pipeline as never, "harbor");
@@ -749,7 +757,7 @@ describe("agent deterministic writing tools", () => {
       instruction: "整体重写第一章",
     } as any);
 
-    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 1, "rewrite");
+    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 1, "rewrite", "整体重写第一章");
     expect(result.details).toMatchObject({
       kind: "chapter_revision",
       bookId: "harbor",
@@ -757,12 +765,17 @@ describe("agent deterministic writing tools", () => {
       mode: "rewrite",
       applied: false,
       status: "unchanged",
-      skippedReason: expect.stringContaining("kept original chapter"),
+      skippedReason: expect.stringContaining("before blocking=2"),
+      revisionDiagnostics: expect.objectContaining({
+        before: { blockingCount: 2, criticalCount: 1, aiTellCount: 3 },
+        after: { blockingCount: 2, criticalCount: 1, aiTellCount: 3 },
+      }),
     });
     expect(result.content[0]?.type).toBe("text");
     if (result.content[0]?.type === "text") {
       expect(result.content[0].text).toContain("Revision not applied");
-      expect(result.content[0].text).toContain("kept original chapter");
+      expect(result.content[0].text).toContain("Revision gate");
+      expect(result.content[0].text).toContain("Chapter Memo Drift");
       expect(result.content[0].text).not.toContain("Revision (rewrite) complete");
     }
   });
@@ -933,7 +946,7 @@ describe("agent deterministic writing tools", () => {
       instruction: "重写第3章",
     } as any);
 
-    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 3, "spot-fix");
+    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 3, "spot-fix", "重写第3章");
   });
 
   it("uses explicit exporter params instead of guessing from instruction", async () => {

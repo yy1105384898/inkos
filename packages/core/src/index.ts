@@ -698,3 +698,8 @@ export {
 } from "./interactive-film/emotion.js";
 export { exportInk } from "./interactive-film/export-ink.js";
 export { buildPlayableHtml } from "./interactive-film/export-html.js";
+
+// Translation workflow
+export * from "./translation/index.js";
+export { createTranslationCreateTool } from "./agent/agent-tools.js";
+export { resolveChapterReviewMode, resolveRevisionGate } from "./models/book.js";

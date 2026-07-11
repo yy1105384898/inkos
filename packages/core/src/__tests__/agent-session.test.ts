@@ -139,6 +139,13 @@ vi.mock("@mariozechner/pi-ai", async () => {
                 text: "# 第2章\n\n我把账页摊在桌上，冷库的灯一盏盏暗下去。".repeat(80),
               },
             ], timestamp)
+        : prompt === "revision instructions"
+          ? assistant([
+              {
+                type: "text",
+                text: "## 第2章 修改指令\n\n目标：把这一章从润色改成重写，先删掉原来的寒暄，再让主角主动发现账页异常。\n\n执行：保留冷库线索，重写对话，补足动机。".repeat(30),
+              },
+            ], timestamp)
         : prompt === "write next" || allUserText.includes("write next")
           ? assistant([
               {
@@ -185,7 +192,7 @@ vi.mock("@mariozechner/pi-ai", async () => {
   };
 });
 
-import { runAgentSession, evictAgentCache } from "../agent/agent-session.js";
+import { abortAgentSession, runAgentSession, evictAgentCache } from "../agent/agent-session.js";
 import {
   appendManualSessionMessages,
   appendTranscriptEvent,
@@ -233,6 +240,7 @@ describe("runAgentSession cache — bookId switch", () => {
     evictAgentCache("play-session");
     evictAgentCache("play-active-session");
     evictAgentCache("play-confirmed-session");
+    evictAgentCache("abort-session");
     await rm(projectRoot, { recursive: true, force: true });
     if (otherProjectRoot) await rm(otherProjectRoot, { recursive: true, force: true });
   });
@@ -561,6 +569,9 @@ describe("runAgentSession cache — bookId switch", () => {
     expect(agentInstances[0].state.tools.map((tool: any) => tool.name)).toEqual([
       "propose_action",
       "research_web",
+      "ingest_material",
+      "retrieve_material",
+      "import_chapters",
     ]);
   });
 
@@ -576,6 +587,8 @@ describe("runAgentSession cache — bookId switch", () => {
     expect(agentInstances[0].state.tools.map((tool: any) => tool.name)).toEqual([
       "propose_action",
       "research_web",
+      "ingest_material",
+      "retrieve_material",
     ]);
   });
 
@@ -631,6 +644,8 @@ describe("runAgentSession cache — bookId switch", () => {
     );
     expect(agentInstances[0].state.tools.map((tool: any) => tool.name)).toEqual([
       "propose_action",
+      "ingest_material",
+      "retrieve_material",
     ]);
 
     await runAgentSession(
@@ -639,6 +654,8 @@ describe("runAgentSession cache — bookId switch", () => {
     );
     expect(agentInstances[1].state.tools.map((tool: any) => tool.name)).toEqual([
       "propose_action",
+      "ingest_material",
+      "retrieve_material",
     ]);
   });
 
@@ -751,9 +768,23 @@ describe("runAgentSession cache — bookId switch", () => {
       "raw chapter",
     );
 
-    expect(result.responseText).toContain("没有落盘");
-    expect(result.responseText).toContain("sub_agent(agent=\"writer\")");
+    expect(result.responseText).toContain("没有调用落盘工具");
+    expect(result.responseText).toContain("修改旧章");
     expect(result.responseText).not.toContain("# 第2章");
+  });
+
+  it("does not replace chapter-scoped revision instructions as raw chapter prose", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+
+    const result = await runAgentSession(
+      { sessionId: "book-revision-instruction-session", bookId: "book-a", sessionKind: "book", language: "zh", pipeline, projectRoot, model },
+      "revision instructions",
+    );
+
+    expect(result.responseText).toContain("第2章 修改指令");
+    expect(result.responseText).toContain("把这一章从润色改成重写");
+    expect(result.responseText).not.toContain("没有调用落盘工具");
   });
 
   it("exposes play_edit, play_revise, and play_step after the play world exists for this session", async () => {
@@ -775,6 +806,8 @@ describe("runAgentSession cache — bookId switch", () => {
       "play_edit",
       "play_revise",
       "play_step",
+      "ingest_material",
+      "retrieve_material",
     ]);
   });
 
@@ -862,6 +895,9 @@ describe("runAgentSession cache — bookId switch", () => {
       "patch_chapter_text",
       "replace_chapter_text",
       "research_web",
+      "ingest_material",
+      "retrieve_material",
+      "import_chapters",
       "grep",
       "ls",
     ]);
@@ -882,6 +918,8 @@ describe("runAgentSession cache — bookId switch", () => {
       "rename_entity",
       "patch_chapter_text",
       "replace_chapter_text",
+      "ingest_material",
+      "retrieve_material",
       "grep",
       "ls",
     ]);
@@ -1215,6 +1253,30 @@ describe("runAgentSession cache — bookId switch", () => {
     );
     expect(agentInstances).toHaveLength(instancesAfterError + 1);
     expect(JSON.stringify(streamCalls.at(-1)?.context.messages)).not.toContain("model error");
+  });
+
+  it("aborts and evicts an active cached agent session", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+
+    await runAgentSession(
+      { sessionId: "abort-session", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "hello",
+    );
+
+    const abortSpy = vi.spyOn(agentInstances.at(-1), "abort");
+    const clearSpy = vi.spyOn(agentInstances.at(-1), "clearAllQueues");
+
+    expect(abortAgentSession(projectRoot, "abort-session")).toBe(true);
+    expect(abortSpy).toHaveBeenCalledOnce();
+    expect(clearSpy).toHaveBeenCalledOnce();
+
+    const instancesAfterAbort = agentInstances.length;
+    await runAgentSession(
+      { sessionId: "abort-session", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "again",
+    );
+    expect(agentInstances).toHaveLength(instancesAfterAbort + 1);
   });
 
   it("serializes concurrent turns before assigning transcript seq", async () => {

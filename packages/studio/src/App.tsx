@@ -25,6 +25,7 @@ const FilmWizard = lazy(() => import("./pages/FilmWizard"));
 import { LanguageSelector } from "./pages/LanguageSelector";
 import { LoginPage } from "./pages/LoginPage";
 import { AdminPanel } from "./pages/AdminPanel";
+import { TranslationManager } from "./pages/TranslationManager";
 import { BookSidebar, BookSidebarToggle } from "./components/chat/BookSidebar";
 import { MobileBottomNav } from "./components/mobile/MobileBottomNav";
 import { useSSE } from "./hooks/use-sse";
@@ -120,6 +121,7 @@ export function App() {
     toFlow: (projectId: string) => setRoute({ page: "flow", projectId }),
     toFilmAuthor: (projectId: string) => setRoute({ page: "film-author", projectId }),
     toFilmStudio: (projectId: string) => setRoute({ page: "film-studio", projectId }),
+    toTranslation: () => setRoute({ page: "translation" }),
   };
 
   const activeBookId = deriveActiveBookId(route);
@@ -373,6 +375,11 @@ export function App() {
           {route.page === "doctor" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <DoctorView nav={nav} theme={theme} t={t} />
+            </div>
+          )}
+          {route.page === "translation" && (
+            <div className="max-w-6xl mx-auto w-full px-6 py-12 md:px-12 lg:py-16 fade-in">
+              <TranslationManager nav={nav} theme={theme} t={t} />
             </div>
           )}
           {route.page === "admin" && auth.user.role === "admin" && (

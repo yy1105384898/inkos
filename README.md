@@ -35,6 +35,16 @@
 YANGYANG 小说 Agent 是基于 InkOS 二次开发的中文小说创作 Agent，云服务器统一保存书籍、章节、聊天记录、模型配置、封面配置和创作成果，并按登录用户隔离。它可以自主写小说——写、审、改，全程接管。覆盖玄幻、仙侠、都市、科幻等多种风格，支持续写、番外、同人、仿写、互动影游等创作形式。人工审核门控确保你始终掌控全局。
 
 
+## v1.6.2 - Chat 附件、材料库与可编辑提示词
+
+InkOS 1.6.2 把 Studio Chat 的协作能力补齐到更接近真实创作工作台：你可以上传文档、Markdown 和图片，让模型在回答和创作中直接读取；也可以中断长任务，把外部材料归档成可检索参考，并在 Studio 里直接调整关键提示词包。
+
+- **文件 / 图片附件**：Chat 支持上传文本、Markdown 和图片。文本会进入 LLM 上下文；图片会作为多模态输入传给支持视觉的模型。
+- **材料归档检索**：外部材料可以沉淀到项目材料库，后续写作、讨论和研究可带 evidence trace 检索引用，不必反复复制粘贴。
+- **可编辑提示词包**：进入 **项目设置 → 提示词**，可查看和调整 longform、Play、互动影游等内置 prompt pack。修改会保存到项目级 `prompt/.../*.md`，不覆盖内置默认值。
+- **中断长任务**：Chat 运行中的长任务可以主动停止，避免模型或上游卡住时只能刷新页面。
+- **旧章修订更可控**：在 Chat 里要求“重写 / 重修 / 调整方向”时，本轮对话会作为一次性修订 brief 传给 reviser；如果修订未落盘，系统会显示具体判定指标和剩余问题。
+
 ## v1.6.0 - 互动影游与 Skill 系统
 
 InkOS 1.6.0 把开放世界继续推进到互动影游、剧本和分镜工作台，同时引入可插拔 Skill 系统：专业能力可以被 Chat 自动调用，也可以由用户强制指定。写作、互动、研究和导出继续共享同一套 action surface，重动作确认后再执行，产物可以在 Studio 内查看和导出。
@@ -119,6 +129,7 @@ inkos interact --json --message "继续当前书，但把节奏再收紧一点"
 - 或设置 `INKOS_SKILL_DIRS=/abs/path/to/skills`，可指向单个 skill 目录，也可指向包含多个 skill 子目录的目录。多个目录按系统分隔符分隔。
 - 在 Chat 里用 `@skill-id` 强制本轮使用，例如：`@detective-play 做一个证据链驱动的开放世界`。
 - 不写 `@skill-id` 时，系统会根据 session 类型和触发词自动选择内置 skill，例如长篇、开放世界、互动影游。
+- 在 Studio 的 **项目设置 → 提示词** 可以编辑内置 prompt pack；项目级覆盖文件会写到 `prompt/<pack>/<prompt>.md`，例如 `prompt/play/renderer.md`、`prompt/longform/writer.md`。
 
 最小 `SKILL.md` 示例：
 
@@ -253,7 +264,7 @@ inkos doctor
 | `cli-project` | CLI 运行时：以 Studio 配置为基础，再叠加 env 和 CLI 参数 |
 | `legacy-env` | 旧 env 模式：兼容老项目的纯 `.env` 配置 |
 
-如果服务测试失败，优先检查服务商、模型和协议是否匹配。Google Gemini 的 AI Studio API Key 可用于 Gemini OpenAI-compatible endpoint；InkOS 会自动禁用 Google 不支持的 OpenAI `store` 参数。MiniMax / MiniMax CodingPlan 默认走官方 OpenAI-compatible `/v1/chat/completions`，并优先使用可工作的非流式 transport，避免流式返回 usage 但无正文的问题。
+如果服务测试失败，优先检查服务商、模型和协议是否匹配。Google Gemini 的 AI Studio API Key 可用于 Gemini OpenAI-compatible endpoint；InkOS 会自动禁用 Google 不支持的 OpenAI `store` 参数。MiniMax 默认走官方 OpenAI-compatible `/v1/chat/completions`，并优先使用可工作的非流式 transport，避免流式返回 usage 但无正文的问题；`MiniMax-M3*` 会默认关闭 thinking 返回，M2.x thinking 由上游限制无法关闭。
 
 ### v2.0 LLM 配置更新
 

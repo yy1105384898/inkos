@@ -4,6 +4,7 @@ import { initCommand } from "./commands/init.js";
 import { configCommand } from "./commands/config.js";
 import { bookCommand } from "./commands/book.js";
 import { writeCommand } from "./commands/write.js";
+import { autoCommand } from "./commands/auto.js";
 import { reviewCommand } from "./commands/review.js";
 import { statusCommand } from "./commands/status.js";
 import { radarCommand } from "./commands/radar.js";
@@ -25,6 +26,7 @@ import { evalCommand } from "./commands/eval.js";
 import { importCommand } from "./commands/import.js";
 import { fanficCommand } from "./commands/fanfic.js";
 import { shortCommand } from "./commands/short-fiction.js";
+import { translateCommand } from "./commands/translate.js";
 import { createStudioCommand, launchStudioEntry } from "./commands/studio.js";
 import { consolidateCommand } from "./commands/consolidate.js";
 import { createInteractCommand, type InteractCommandHooks } from "./commands/interact.js";
@@ -63,6 +65,7 @@ export function createProgram(hooks: ProgramHooks = {}): Command {
   program.addCommand(configCommand);
   program.addCommand(bookCommand);
   program.addCommand(writeCommand);
+  program.addCommand(autoCommand);
   program.addCommand(reviewCommand);
   program.addCommand(statusCommand);
   program.addCommand(radarCommand);
@@ -85,6 +88,7 @@ export function createProgram(hooks: ProgramHooks = {}): Command {
   program.addCommand(importCommand);
   program.addCommand(fanficCommand);
   program.addCommand(shortCommand);
+  program.addCommand(translateCommand);
   program.addCommand(createStudioCommand({ launchStudio: hooks.launchStudio }));
   program.addCommand(consolidateCommand);
   program.addCommand(createInteractCommand({

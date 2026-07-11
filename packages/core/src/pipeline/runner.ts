@@ -1,7 +1,7 @@
 import type { LLMClient, OnStreamProgress } from "../llm/provider.js";
 import { chatCompletion, createLLMClient } from "../llm/provider.js";
 import type { Logger } from "../utils/logger.js";
-import type { BookConfig, FanficMode } from "../models/book.js";
+import type { BookConfig, FanficMode, RevisionGate } from "../models/book.js";
 import type { ChapterMeta } from "../models/chapter.js";
 import type { NotifyChannel, LLMConfig, AgentLLMOverride, InputGovernanceMode } from "../models/project.js";
 import type { GenreProfile } from "../models/genre-profile.js";
@@ -257,6 +257,13 @@ export function buildImportFoundationSource(
   ].join("\n");
 }
 
+/** Human-readable description of each manual-revision gate, surfaced in revisionDiagnostics. */
+const REVISION_GATE_STANDARDS: Record<RevisionGate, string> = {
+  strict: "A revision is applied only when blocking, critical, and AI-tell counts do not worsen, and at least blocking or AI-tell issues improve.",
+  lenient: "A revision is applied whenever blocking, critical, and AI-tell counts do not worsen; no improvement is required (lenient gate).",
+  always: "Manual revisions are always applied; audit counts are recorded for reference only (always gate).",
+};
+
 export interface PipelineConfig {
   readonly client: LLMClient;
   readonly model: string;
@@ -270,6 +277,14 @@ export interface PipelineConfig {
    * become explicit, user-driven checkpoint actions — chapter write stays fast.
    */
   readonly chapterReviewMode?: "auto" | "manual";
+  /**
+   * Gate for applying manual revisions (default "strict"):
+   * - "strict": apply only when blocking/critical/AI-tell counts do not worsen
+   *   AND at least one of blocking or AI-tell improves.
+   * - "lenient": apply whenever the counts do not worsen (no improvement required).
+   * - "always": always apply; audit counts are recorded but never block.
+   */
+  readonly revisionGate?: RevisionGate;
   readonly notifyChannels?: ReadonlyArray<NotifyChannel>;
   readonly radarSources?: ReadonlyArray<RadarSource>;
   readonly externalContext?: string;
@@ -330,6 +345,25 @@ export interface ReviseResult {
   readonly applied: boolean;
   readonly status: "unchanged" | "ready-for-review" | "audit-failed";
   readonly skippedReason?: string;
+  readonly revisionDiagnostics?: {
+    readonly standard: string;
+    readonly before: {
+      readonly blockingCount: number;
+      readonly criticalCount: number;
+      readonly aiTellCount: number;
+    };
+    readonly after: {
+      readonly blockingCount: number;
+      readonly criticalCount: number;
+      readonly aiTellCount: number;
+    };
+    readonly remainingIssues: ReadonlyArray<{
+      readonly severity: AuditIssue["severity"];
+      readonly category: string;
+      readonly description: string;
+      readonly suggestion?: string;
+    }>;
+  };
   readonly lengthWarnings?: ReadonlyArray<string>;
   readonly lengthTelemetry?: LengthTelemetry;
 }
@@ -1266,7 +1300,7 @@ export class PipelineRunner {
   }
 
   /** Revise the latest (or specified) chapter based on audit issues. */
-  async reviseDraft(bookId: string, chapterNumber?: number, mode: ReviseMode = DEFAULT_REVISE_MODE): Promise<ReviseResult> {
+  async reviseDraft(bookId: string, chapterNumber?: number, mode: ReviseMode = DEFAULT_REVISE_MODE, externalContext?: string): Promise<ReviseResult> {
     const releaseLock = await this.state.acquireBookLock(bookId);
     try {
       const book = await this.state.loadBookConfig(bookId);
@@ -1294,13 +1328,14 @@ export class PipelineRunner {
       const { profile: gp } = await this.loadGenreProfile(book.genre);
       const language = book.language ?? gp.language;
       const countingMode = resolveLengthCountingMode(language);
+      const effectiveExternalContext = externalContext ?? this.config.externalContext;
       const reviseControlInput = (this.config.inputGovernanceMode ?? "v2") === "legacy"
         ? undefined
         : await this.createGovernedArtifacts(
           book,
           bookDir,
           targetChapter,
-          this.config.externalContext,
+          effectiveExternalContext,
           { reuseExistingIntentWhenContextMissing: true },
         );
       const preRevision = await this.evaluateMergedAudit({
@@ -1427,19 +1462,45 @@ export class PipelineRunner {
       const blockingDidNotWorsen = effectivePostRevision.blockingCount <= preRevision.blockingCount;
       const criticalDidNotWorsen = effectivePostRevision.criticalCount <= preRevision.criticalCount;
       const aiDidNotWorsen = effectivePostRevision.aiTellCount <= preRevision.aiTellCount;
-      const shouldApplyRevision = blockingDidNotWorsen
-        && criticalDidNotWorsen
-        && aiDidNotWorsen
-        && (improvedBlocking || improvedAITells);
+      const didNotWorsen = blockingDidNotWorsen && criticalDidNotWorsen && aiDidNotWorsen;
+      const revisionGate = this.config.revisionGate ?? "strict";
+      const shouldApplyRevision = revisionGate === "always"
+        ? true
+        : revisionGate === "lenient"
+          ? didNotWorsen
+          : didNotWorsen && (improvedBlocking || improvedAITells);
 
       if (!shouldApplyRevision) {
+        const remainingIssues = effectivePostRevision.revisionBlockingIssues
+          .filter((issue) => issue.severity === "warning" || issue.severity === "critical")
+          .slice(0, 6)
+          .map((issue) => ({
+            severity: issue.severity,
+            category: issue.category,
+            description: issue.description,
+            ...(issue.suggestion ? { suggestion: issue.suggestion } : {}),
+          }));
         return {
           chapterNumber: targetChapter,
           wordCount: revisionBaseCount,
           fixedIssues: [],
           applied: false,
           status: "unchanged",
-          skippedReason: "Manual revision did not improve merged audit or AI-tell metrics; kept original chapter.",
+          skippedReason: `Manual revision kept original chapter: before blocking=${preRevision.blockingCount}, critical=${preRevision.criticalCount}, aiTell=${preRevision.aiTellCount}; after blocking=${effectivePostRevision.blockingCount}, critical=${effectivePostRevision.criticalCount}, aiTell=${effectivePostRevision.aiTellCount}.`,
+          revisionDiagnostics: {
+            standard: REVISION_GATE_STANDARDS[revisionGate],
+            before: {
+              blockingCount: preRevision.blockingCount,
+              criticalCount: preRevision.criticalCount,
+              aiTellCount: preRevision.aiTellCount,
+            },
+            after: {
+              blockingCount: effectivePostRevision.blockingCount,
+              criticalCount: effectivePostRevision.criticalCount,
+              aiTellCount: effectivePostRevision.aiTellCount,
+            },
+            remainingIssues,
+          },
         };
       }
       this.logLengthWarnings(lengthWarnings);

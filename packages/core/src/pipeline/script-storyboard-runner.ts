@@ -20,6 +20,7 @@ import {
   type StoryboardCreationInput,
 } from "../agents/script-storyboard.js";
 import { safeChildPath } from "../utils/path-safety.js";
+import { toPosixPath } from "../utils/posix-path.js";
 
 export interface ScriptCreationRunOptions {
   readonly projectRoot: string;
@@ -33,6 +34,7 @@ export interface ScriptCreationRunOptions {
   readonly requirements?: string;
   readonly episodeCount?: number;
   readonly episodeDuration?: string;
+  readonly language?: "zh" | "en";
   readonly projectId?: string;
   readonly outDir?: string;
   readonly onProgress?: (message: string) => void;
@@ -51,6 +53,7 @@ export interface StoryboardCreationRunOptions {
   readonly aspectRatio?: string;
   readonly granularity?: string;
   readonly maxShots?: number;
+  readonly language?: "zh" | "en";
   readonly projectId?: string;
   readonly outDir?: string;
   readonly onProgress?: (message: string) => void;
@@ -70,6 +73,7 @@ export interface InteractiveFilmCreationRunOptions {
   readonly episodeDuration?: string;
   readonly budget?: string;
   readonly referenceMode?: string;
+  readonly language?: "zh" | "en";
   readonly projectId?: string;
   readonly outDir?: string;
   readonly onProgress?: (message: string) => void;
@@ -152,9 +156,10 @@ export async function runScriptCreation(
     sourceKind: options.sourceKind,
     targetFormat: options.targetFormat,
     sourceText,
-    requirements: mergeRequirements(options.instruction, options.requirements),
+    requirements: mergeRequirements(options.instruction, options.requirements, options.language),
     episodeCount: options.episodeCount,
     episodeDuration: options.episodeDuration,
+    language: options.language,
   };
 
   options.onProgress?.("Writing script creation spec...");
@@ -175,8 +180,8 @@ export async function runScriptCreation(
   return {
     projectId,
     baseDir,
-    specPath: join(baseDir, "script-spec.md"),
-    scriptPath: join(baseDir, "script.md"),
+    specPath: relPath(baseDir, "script-spec.md"),
+    scriptPath: relPath(baseDir, "script.md"),
   };
 }
 
@@ -190,12 +195,13 @@ export async function runInteractiveFilmCreation(
     title: options.title,
     sourceKind: options.sourceKind,
     sourceText,
-    requirements: mergeRequirements(options.instruction, options.requirements),
+    requirements: mergeRequirements(options.instruction, options.requirements, options.language),
     targetAudience: options.targetAudience,
     episodeCount: options.episodeCount,
     episodeDuration: options.episodeDuration,
     budget: options.budget,
     referenceMode: options.referenceMode,
+    language: options.language,
   };
 
   options.onProgress?.("Writing interactive-film creation spec...");
@@ -231,7 +237,7 @@ export async function runInteractiveFilmCreation(
     "Storyboard",
   ], packageMarkdown);
   const imagePrompts = extractStoryboardImagePrompts(storyboard);
-  const storyGraphPath = join("interactive-films", projectId, "story-graph.json");
+  const storyGraphPath = relPath("interactive-films", projectId, "story-graph.json");
 
   await writeProjectText(options.projectRoot, join(baseDir, "story-tree.md"), storyTree);
   await writeProjectText(options.projectRoot, join(baseDir, "flags.md"), flags);
@@ -279,14 +285,14 @@ export async function runInteractiveFilmCreation(
     projectId,
     baseDir,
     storyGraphPath,
-    specPath: join(baseDir, "interactive-spec.md"),
-    storyTreePath: join(baseDir, "story-tree.md"),
-    flagsPath: join(baseDir, "flags.md"),
-    scriptPath: join(baseDir, "script.md"),
-    storyboardPath: join(baseDir, "storyboard.md"),
-    imagePromptsPath: join(baseDir, "image-prompts.md"),
-    assetsManifestPath: join(baseDir, "assets.json"),
-    assetsDir: join(baseDir, "assets"),
+    specPath: relPath(baseDir, "interactive-spec.md"),
+    storyTreePath: relPath(baseDir, "story-tree.md"),
+    flagsPath: relPath(baseDir, "flags.md"),
+    scriptPath: relPath(baseDir, "script.md"),
+    storyboardPath: relPath(baseDir, "storyboard.md"),
+    imagePromptsPath: relPath(baseDir, "image-prompts.md"),
+    assetsManifestPath: relPath(baseDir, "assets.json"),
+    assetsDir: relPath(baseDir, "assets"),
   };
 }
 
@@ -300,11 +306,12 @@ export async function runStoryboardCreation(
     title: options.title,
     sourceKind: options.sourceKind,
     sourceText,
-    requirements: mergeRequirements(options.instruction, options.requirements),
+    requirements: mergeRequirements(options.instruction, options.requirements, options.language),
     visualStyle: options.visualStyle,
     aspectRatio: options.aspectRatio,
     granularity: options.granularity,
     maxShots: options.maxShots,
+    language: options.language,
   };
 
   options.onProgress?.("Writing storyboard creation spec...");
@@ -343,11 +350,11 @@ export async function runStoryboardCreation(
   return {
     projectId,
     baseDir,
-    specPath: join(baseDir, "storyboard-spec.md"),
-    storyboardPath: join(baseDir, "storyboard.md"),
-    imagePromptsPath: join(baseDir, "image-prompts.md"),
-    assetsManifestPath: join(baseDir, "assets.json"),
-    assetsDir: join(baseDir, "assets"),
+    specPath: relPath(baseDir, "storyboard-spec.md"),
+    storyboardPath: relPath(baseDir, "storyboard.md"),
+    imagePromptsPath: relPath(baseDir, "image-prompts.md"),
+    assetsManifestPath: relPath(baseDir, "assets.json"),
+    assetsDir: relPath(baseDir, "assets"),
   };
 }
 
@@ -383,6 +390,20 @@ function buildInteractiveFilmGraphPremise(
   script: string,
   imagePrompts: string,
 ): string {
+  if ((input.language ?? "zh") === "en") {
+    return [
+      `Creation brief: ${input.requirements}`,
+      input.targetAudience ? `Target audience: ${input.targetAudience}` : "",
+      input.episodeCount ? `Segments/episodes: ${input.episodeCount}` : "",
+      input.episodeDuration ? `Per-segment duration: ${input.episodeDuration}` : "",
+      input.budget ? `Budget: ${input.budget}` : "",
+      input.referenceMode ? `Reference mode: ${input.referenceMode}` : "",
+      `Story tree:\n${storyTree}`,
+      `Variables and flags:\n${flags}`,
+      `Interactive script:\n${script}`,
+      `Image prompts:\n${imagePrompts}`,
+    ].filter(Boolean).join("\n\n");
+  }
   return [
     `创作需求：${input.requirements}`,
     input.targetAudience ? `目标受众：${input.targetAudience}` : "",
@@ -403,16 +424,17 @@ function buildFallbackStoryGraph(
   input: InteractiveFilmCreationInput,
   imagePrompts: string,
 ): StoryGraph {
+  const en = (input.language ?? "zh") === "en";
   const prompts = parseStoryboardPromptLines(imagePrompts);
   const actCount = Math.max(2, Math.min(8, (input.episodeCount ?? prompts.length) || 3));
   const nodes: StoryGraph["nodes"] = [
     {
       id: "start",
-      title: "开场",
+      title: en ? "Opening" : "开场",
       type: "start",
       sceneDesc: input.requirements || title,
       dialogue: [],
-      choices: [{ id: "start-act-1", text: "进入第一幕", targetNodeId: "act-1", effects: [] }],
+      choices: [{ id: "start-act-1", text: en ? "Enter Act 1" : "进入第一幕", targetNodeId: "act-1", effects: [] }],
       imageSlot: { prompt: prompts[0] ?? input.requirements ?? title },
       act: "start",
       position: { x: 0, y: 0 },
@@ -423,16 +445,16 @@ function buildFallbackStoryGraph(
     const isLast = index === actCount;
     nodes.push({
       id: `act-${index}`,
-      title: `第 ${index} 幕`,
+      title: en ? `Act ${index}` : `第 ${index} 幕`,
       type: isLast ? "branch" : "normal",
-      sceneDesc: `互动影游《${title}》第 ${index} 幕。`,
+      sceneDesc: en ? `Act ${index} of the interactive film "${title}".` : `互动影游《${title}》第 ${index} 幕。`,
       dialogue: [],
       choices: isLast
         ? [
-          { id: "to-ending-a", text: "完成主线目标", targetNodeId: "ending-a", effects: [{ var: "story_progress", op: "add", value: 1 }] },
-          { id: "to-ending-b", text: "进入另一条余波", targetNodeId: "ending-b", effects: [{ var: "story_progress", op: "add", value: 1 }] },
+          { id: "to-ending-a", text: en ? "Complete the main objective" : "完成主线目标", targetNodeId: "ending-a", effects: [{ var: "story_progress", op: "add", value: 1 }] },
+          { id: "to-ending-b", text: en ? "Take the other aftermath" : "进入另一条余波", targetNodeId: "ending-b", effects: [{ var: "story_progress", op: "add", value: 1 }] },
         ]
-        : [{ id: `act-${index}-next`, text: "继续推进", targetNodeId: `act-${index + 1}`, effects: [{ var: "story_progress", op: "add", value: 1 }] }],
+        : [{ id: `act-${index}-next`, text: en ? "Keep going" : "继续推进", targetNodeId: `act-${index + 1}`, effects: [{ var: "story_progress", op: "add", value: 1 }] }],
       imageSlot: { prompt: prompts[index - 1] ?? prompts[0] ?? input.requirements ?? title },
       act: `act-${index}`,
       position: { x: index * 260, y: index % 2 === 0 ? 120 : 0 },
@@ -442,9 +464,9 @@ function buildFallbackStoryGraph(
   nodes.push(
     {
       id: "ending-a",
-      title: "结局一",
+      title: en ? "Ending One" : "结局一",
       type: "ending",
-      sceneDesc: "主线目标被完成，故事进入收束。",
+      sceneDesc: en ? "The main objective is completed and the story converges." : "主线目标被完成，故事进入收束。",
       dialogue: [],
       choices: [],
       act: "ending",
@@ -452,9 +474,11 @@ function buildFallbackStoryGraph(
     },
     {
       id: "ending-b",
-      title: "结局二",
+      title: en ? "Ending Two" : "结局二",
       type: "ending",
-      sceneDesc: "玩家选择保留另一条余波，故事进入分岔收束。",
+      sceneDesc: en
+        ? "The player keeps the other aftermath and the story closes on the forked path."
+        : "玩家选择保留另一条余波，故事进入分岔收束。",
       dialogue: [],
       choices: [],
       act: "ending",
@@ -474,11 +498,28 @@ function buildFallbackStoryGraph(
       durationMinutes: 0,
     },
     characters: [],
-    variables: [{ name: "story_progress", type: "counter", default: 0, desc: "剧情推进进度" }],
+    variables: [{
+      name: "story_progress",
+      type: "counter",
+      default: 0,
+      desc: en ? "Story progression" : "剧情推进进度",
+    }],
     nodes,
     endings: [
-      { id: "ending-a", nodeId: "ending-a", title: "结局一", type: "neutral", description: "主线目标被完成。" },
-      { id: "ending-b", nodeId: "ending-b", title: "结局二", type: "secret", description: "玩家选择保留另一条余波。" },
+      {
+        id: "ending-a",
+        nodeId: "ending-a",
+        title: en ? "Ending One" : "结局一",
+        type: "neutral",
+        description: en ? "The main objective is completed." : "主线目标被完成。",
+      },
+      {
+        id: "ending-b",
+        nodeId: "ending-b",
+        title: en ? "Ending Two" : "结局二",
+        type: "secret",
+        description: en ? "The player keeps the other aftermath." : "玩家选择保留另一条余波。",
+      },
     ],
   };
 }
@@ -496,20 +537,20 @@ export function createStoryboardAssetsManifest(args: {
   readonly imagePrompts: string;
   readonly createdAt: string;
 }): StoryboardAssetsManifest {
-  const assetsDir = join(args.baseDir, "assets");
+  const assetsDir = relPath(args.baseDir, "assets");
   const prompts = parseStoryboardPromptLines(args.imagePrompts);
   return {
     version: 1,
     kind: "storyboard_assets",
     title: args.title,
     projectId: args.projectId,
-    baseDir: args.baseDir,
-    storyboardPath: args.storyboardPath,
-    imagePromptsPath: args.imagePromptsPath,
+    baseDir: toPosixPath(args.baseDir),
+    storyboardPath: toPosixPath(args.storyboardPath),
+    imagePromptsPath: toPosixPath(args.imagePromptsPath),
     assetsDir,
-    sourceDir: join(assetsDir, "source"),
-    generatedDir: join(assetsDir, "generated"),
-    selectedDir: join(assetsDir, "selected"),
+    sourceDir: relPath(assetsDir, "source"),
+    generatedDir: relPath(assetsDir, "generated"),
+    selectedDir: relPath(assetsDir, "selected"),
     createdAt: args.createdAt,
     assets: prompts.map((prompt, index) => {
       const shotId = `shot-${String(index + 1).padStart(3, "0")}`;
@@ -546,10 +587,15 @@ async function ensureProjectDir(projectRoot: string, relativePath: string): Prom
   await mkdir(safeChildPath(projectRoot, relativePath), { recursive: true });
 }
 
-function mergeRequirements(instruction: string, requirements: string | undefined): string {
+function mergeRequirements(
+  instruction: string,
+  requirements: string | undefined,
+  language: "zh" | "en" = "zh",
+): string {
+  const extraLabel = language === "en" ? "Additional requirements:" : "补充要求：";
   return [
     instruction.trim(),
-    requirements?.trim() ? `\n补充要求：\n${requirements.trim()}` : "",
+    requirements?.trim() ? `\n${extraLabel}\n${requirements.trim()}` : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -563,7 +609,12 @@ function normalizeOutputDir(value: string): string {
 
 function resolveProjectBaseDir(outDir: string, projectId: string): string {
   const outputDir = normalizeOutputDir(outDir);
-  return basename(outputDir) === projectId ? outputDir : join(outputDir, projectId);
+  return basename(outputDir) === projectId ? outputDir : relPath(outputDir, projectId);
+}
+
+// Project-relative path for results and manifests: always "/" separators.
+function relPath(...segments: string[]): string {
+  return toPosixPath(join(...segments));
 }
 
 function safeSegment(value: string): string {

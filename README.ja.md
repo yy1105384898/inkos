@@ -28,7 +28,17 @@
 
 InkOS は、長編小説、独立短編、脚本、分镜、二次創作、番外、文体模倣、続き書き、インタラクティブ影遊プロジェクト、インタラクティブ世界を扱うローカル AI 創作システムです。Studio Chat、CLI、TUI は同じ action surface を共有し、相談、確認、生成、プレビュー、外部リサーチ、永続ファイル編集を一つの流れで扱えます。
 
-> 💡 **まず執筆エージェントに専門データの層を** —— 小説を書くのに足りないのはモデルだけではなく、多くの場合は素材です。InkOS には [**火花数据API（huohuaapi）**](https://huohuaapi.com/) の併用がおすすめ：従量課金の小説 / ウェブ小説向け創作データ API です。エージェントは書き始める前に、小説本文・章構成・人物設定・文体・創作メソッドなど出典付き素材を検索でき、プロンプトだけで「あらすじ」をでっち上げずに済みます。
+> 💡 **主要モデルをキー 1 本で** —— InkOS には [**keaiapi**](https://keaiapi.com/) の併用がおすすめです。Claude / GPT / Gemini / DeepSeek / Kimi / Qwen / GLM と画像モデルを扱える OpenAI 互換ゲートウェイとして、base URL `https://api.keaiapi.com/v1` をカスタムサービスに設定すれば、複数プロバイダーのアカウントを行き来せずに Studio でモデルを切り替えられます。
+
+## v1.6.2 Chat 添付、素材ライブラリ、編集可能なプロンプト
+
+v1.6.2 では Studio Chat を実際の共同制作ワークスペースに近づけました。文書、Markdown、画像をアップロードし、長い agent turn を中断し、外部素材を後から検索できる参照として保存し、長編 / Play / インタラクティブ影遊を導く prompt pack を Studio で調整できます。
+
+- **Chat 添付**：テキスト / Markdown は LLM の文脈に入り、画像は vision 対応モデルへマルチモーダル入力として渡されます。
+- **素材の保存と検索**：外部資料をプロジェクトの material library に保存し、後続の執筆や相談で evidence trace 付きで参照できます。
+- **編集可能な prompt pack**：**プロジェクト設定 → Prompt packs** で内蔵プロンプトを確認・上書きできます。上書きは `prompt/.../*.md` に保存され、内蔵デフォルトは変更しません。
+- **長時間タスクの中断**：モデルや provider が詰まった場合、Studio Chat から実行中の turn を停止できます。
+- **Chat からの章修訂を改善**：重写 / 修訂の依頼では、そのターンの指示が一回限りの reviser brief として渡されます。修訂が保存されない場合は、判定指標と残った問題を表示します。
 
 ## v1.6.0 主要アップデート
 
@@ -65,7 +75,7 @@ v1.6.0 は、InkOS を開放世界 Play からさらにインタラクティブ�
 
 **Runtime Skill とリサーチ** — `.inkos/skills/` に専門 skill を追加し、`@skill-id` で強制使用できます。外部事実が必要な場合は出典付き Markdown リサーチレポートを生成できます。
 
-**モデル設定** — Studio はサービス設定、モデルルーティング、表紙サービス、[kkaiapi](https://en.kkaiapi.com/) / OpenRouter などのモデル集約入口、カスタム OpenAI-compatible エンドポイントに対応します。
+**モデル設定** — Studio はサービス設定、モデルルーティング、表紙サービス、[keaiapi](https://keaiapi.com/) / OpenRouter などのモデル集約入口、カスタム OpenAI-compatible エンドポイントに対応します。
 
 <p align="center">
   <img src="assets/play-item-warcraft.png" width="420" alt="InkOS Play アイテム画像例">
@@ -113,12 +123,14 @@ inkos
 
 Studio を開き、**モデル設定**へ進みます：
 
-1. Google Gemini、Moonshot、MiniMax、DeepSeek、kkaiapi、OpenRouter、またはカスタムエンドポイントを選択。
+1. Google Gemini、Moonshot、MiniMax、DeepSeek、keaiapi、OpenRouter、またはカスタムエンドポイントを選択。
 2. API Key を貼り付けて接続をテスト。
 3. 利用可能なモデルを選んで保存。
 4. Studio Chat または書籍ページに戻って創作を開始。
 
 Studio はプロジェクトのサービス設定と `.inkos/secrets.json` を使います。env が検出されてもヒントとして表示するだけで、Studio で選んだ service / model / base URL / API Key を上書きしません。
+
+MiniMax は公式 OpenAI-compatible `/v1/chat/completions` エンドポイントを使用します。InkOS は `MiniMax-M3*` の thinking 返却をデフォルトで無効化します。M2.x の thinking は上流サービス側の制限により無効化できません。
 
 **方法2：CLI / daemon / デプロイ環境の env 設定**
 

@@ -44,20 +44,24 @@ export const NotifyChannelSchema = z.discriminatedUnion("type", [
     type: z.literal("telegram"),
     botToken: z.string().min(1),
     chatId: z.string().min(1),
+    format: z.enum(["markdown", "text"]).default("markdown"),
   }),
   z.object({
     type: z.literal("wechat-work"),
     webhookUrl: z.string().url(),
+    format: z.enum(["markdown", "text"]).default("markdown"),
   }),
   z.object({
     type: z.literal("feishu"),
     webhookUrl: z.string().url(),
+    format: z.enum(["markdown", "text"]).default("markdown"),
   }),
   z.object({
     type: z.literal("webhook"),
     url: z.string().url(),
     secret: z.string().optional(),
     events: z.array(z.string()).default([]),
+    format: z.enum(["markdown", "text"]).default("markdown"),
   }),
 ]);
 
@@ -92,6 +96,7 @@ export type FoundationConfig = z.infer<typeof FoundationConfigSchema>;
 export const WritingConfigSchema = z.object({
   reviewRetries: z.number().int().min(0).max(10).default(1),
   reviewMode: z.enum(["auto", "manual"]).default("auto"),
+  revisionGate: z.enum(["strict", "lenient", "always"]).default("strict"),
 });
 
 export type WritingConfig = z.infer<typeof WritingConfigSchema>;

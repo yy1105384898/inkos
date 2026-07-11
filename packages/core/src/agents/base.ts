@@ -1,5 +1,6 @@
 import type { LLMClient, LLMMessage, LLMResponse, OnStreamProgress } from "../llm/provider.js";
 import { chatCompletion } from "../llm/provider.js";
+import { appendPromptPackGuidance } from "../skills/prompt-pack.js";
 import { searchWeb, fetchUrl } from "../utils/web-search.js";
 import type { Logger } from "../utils/logger.js";
 
@@ -30,6 +31,13 @@ export abstract class BaseAgent {
     return chatCompletion(this.ctx.client, this.ctx.model, messages, {
       ...options,
       onStreamProgress: this.ctx.onStreamProgress,
+    });
+  }
+
+  protected async withPromptPackGuidance(basePrompt: string, promptId: string): Promise<string> {
+    return appendPromptPackGuidance(basePrompt, {
+      promptId,
+      projectRoot: this.ctx.projectRoot,
     });
   }
 

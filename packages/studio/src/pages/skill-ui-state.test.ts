@@ -37,6 +37,7 @@ describe("skill-ui-state", () => {
       whenToUse: "用户要玩恋爱互动世界时",
       triggers: "恋爱, 心动\n约会",
       sessionKinds: "play, chat",
+      promptPacks: "play.renderer, play.image",
       body: "保持细腻对话。",
     };
 
@@ -47,6 +48,7 @@ describe("skill-ui-state", () => {
       whenToUse: "用户要玩恋爱互动世界时",
       triggers: ["恋爱", "心动", "约会"],
       sessionKinds: ["play", "chat"],
+      promptPacks: ["play.renderer", "play.image"],
       body: "保持细腻对话。",
     });
   });
