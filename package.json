@@ -24,7 +24,7 @@
     "url": "https://github.com/yy1105384898/inkos"
   },
   "scripts": {
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @actalk/inkos-core build && pnpm -r build",
     "dev": "pnpm -r --parallel dev",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
