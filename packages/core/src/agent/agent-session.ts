@@ -101,6 +101,10 @@ export interface AgentSessionConfig {
   onContextCompression?: ContextCompressionCallback;
   /** Saved project-level response and writing constraints. */
   personalizationMemory?: string;
+  /** Optional background task metadata used by newer callers. */
+  backgroundTaskContext?: unknown;
+  /** Suppress production-only tools for review/background turns. */
+  suppressProductionTools?: boolean;
 }
 
 export interface AgentSessionResult {
@@ -286,7 +290,7 @@ function localAssistantStopStream(model: Model<Api>): AssistantMessageEventStrea
   return stream;
 }
 
-function isTerminalProductionToolName(toolName: unknown): boolean {
+export function isTerminalProductionToolName(toolName: unknown): boolean {
   return toolName === "propose_action"
     || toolName === "sub_agent"
     || toolName === "short_fiction_run"

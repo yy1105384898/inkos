@@ -7,6 +7,7 @@ import { createImportChaptersTool } from "../agent/agent-tools.js";
 
 function mockPipeline() {
   return {
+    runWithAbortSignal: vi.fn(async (_signal: AbortSignal, task: () => Promise<unknown>) => task()),
     importChapters: vi.fn(async (input: { bookId: string; chapters: ReadonlyArray<{ title: string; content: string }> }) => ({
       bookId: input.bookId,
       importedCount: input.chapters.length,
@@ -76,6 +77,20 @@ describe("import_chapters agent tool", () => {
       nextChapter: 3,
       importMode: "continuation",
     });
+  });
+
+  it("runs import inside the tool AbortSignal scope", async () => {
+    const sourceDir = join(root, "abort-source-dir");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(join(sourceDir, "01_序章.md"), "林月守着玉印。", "utf-8");
+    const controller = new AbortController();
+    const pipeline = mockPipeline();
+    const tool = createImportChaptersTool(pipeline as never, "harbor", root);
+
+    await tool.execute("tool-import-abort", { sourcePath: sourceDir }, controller.signal);
+
+    expect(pipeline.runWithAbortSignal).toHaveBeenCalledWith(controller.signal, expect.any(Function));
+    expect(pipeline.importChapters).toHaveBeenCalledOnce();
   });
 
   it("auto-splits a single file by chapter headings and resolves project-relative stored_path", async () => {

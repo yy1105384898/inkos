@@ -192,7 +192,12 @@ vi.mock("@mariozechner/pi-ai", async () => {
   };
 });
 
-import { abortAgentSession, runAgentSession, evictAgentCache } from "../agent/agent-session.js";
+import {
+  abortAgentSession,
+  evictAgentCache,
+  isTerminalProductionToolName,
+  runAgentSession,
+} from "../agent/agent-session.js";
 import {
   appendManualSessionMessages,
   appendTranscriptEvent,
@@ -237,6 +242,7 @@ describe("runAgentSession cache — bookId switch", () => {
     evictAgentCache("short-session");
     evictAgentCache("short-confirmed-session");
     evictAgentCache("cover-confirmed-session");
+    evictAgentCache("suppress-session");
     evictAgentCache("play-session");
     evictAgentCache("play-active-session");
     evictAgentCache("play-confirmed-session");
@@ -363,6 +369,35 @@ describe("runAgentSession cache — bookId switch", () => {
     );
 
     expect(agentInstances).toHaveLength(1);
+  });
+
+  it("injects backgroundTaskContext into the system prompt and rebuilds when it changes", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+    const taskBlock = "## 后台任务状态\n短篇生产正在后台运行，已运行 2 分 10 秒。";
+
+    await runAgentSession(
+      { sessionId: "s1", bookId: null, language: "zh", pipeline, projectRoot, model },
+      "hi",
+    );
+    expect(agentInstances).toHaveLength(1);
+    expect(String(streamCalls.at(-1)?.context.systemPrompt)).not.toContain("后台任务状态");
+
+    // 任务开始运行：注入状态块，缓存的 Agent 必须重建（否则系统提示词是旧的）
+    await runAgentSession(
+      { sessionId: "s1", bookId: null, language: "zh", pipeline, projectRoot, model, backgroundTaskContext: taskBlock },
+      "任务在跑吗？",
+    );
+    expect(agentInstances).toHaveLength(2);
+    expect(String(streamCalls.at(-1)?.context.systemPrompt)).toContain("短篇生产正在后台运行");
+
+    // 任务结束：状态块移除，Agent 再次重建，系统提示词不再包含任务状态
+    await runAgentSession(
+      { sessionId: "s1", bookId: null, language: "zh", pipeline, projectRoot, model },
+      "现在呢？",
+    );
+    expect(agentInstances).toHaveLength(3);
+    expect(String(streamCalls.at(-1)?.context.systemPrompt)).not.toContain("后台任务状态");
   });
 
   it("keeps cached Agents isolated by projectRoot for the same sessionId", async () => {
@@ -733,6 +768,12 @@ describe("runAgentSession cache — bookId switch", () => {
     );
   });
 
+  it("treats narrative forecast cards as terminal tool answers", () => {
+    expect(isTerminalProductionToolName("create_narrative_forecast")).toBe(true);
+    expect(isTerminalProductionToolName("get_narrative_forecast")).toBe(true);
+    expect(isTerminalProductionToolName("select_narrative_branch")).toBe(true);
+  });
+
   it("treats play revise results as terminal instead of asking the model for extra prose", async () => {
     const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
     const pipeline = {
@@ -898,6 +939,58 @@ describe("runAgentSession cache — bookId switch", () => {
       "ingest_material",
       "retrieve_material",
       "import_chapters",
+      "create_narrative_forecast",
+      "get_narrative_forecast",
+      "select_narrative_branch",
+      "grep",
+      "ls",
+    ]);
+  });
+
+  it("suppresses book-mutating production tools while a background task runs and restores them on flag change", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+
+    // 同会话后台生产任务运行中：host 传 suppressProductionTools，工具表剔除
+    // 会创建/修改书籍与产物的生产工具，只保留读取与资料类工具。
+    // 叙事推演三工具只读写 story/runtime/ 下的非正史产物、不碰正史，任务运行期间保留。
+    await runAgentSession(
+      { sessionId: "suppress-session", bookId: "book-a", language: "zh", pipeline, projectRoot, model, suppressProductionTools: true },
+      "任务在跑吗？",
+    );
+    expect(agentInstances[0].state.tools.map((tool: any) => tool.name)).toEqual([
+      "read",
+      "research_web",
+      "ingest_material",
+      "retrieve_material",
+      "create_narrative_forecast",
+      "get_narrative_forecast",
+      "select_narrative_branch",
+      "grep",
+      "ls",
+    ]);
+
+    // 任务结束：flag 变化必须让缓存的 Agent 重建，生产工具恢复
+    await runAgentSession(
+      { sessionId: "suppress-session", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "现在呢？",
+    );
+    expect(agentInstances).toHaveLength(2);
+    expect(agentInstances[1].state.tools.map((tool: any) => tool.name)).toEqual([
+      "sub_agent",
+      "generate_cover",
+      "read",
+      "write_truth_file",
+      "rename_entity",
+      "patch_chapter_text",
+      "replace_chapter_text",
+      "research_web",
+      "ingest_material",
+      "retrieve_material",
+      "import_chapters",
+      "create_narrative_forecast",
+      "get_narrative_forecast",
+      "select_narrative_branch",
       "grep",
       "ls",
     ]);

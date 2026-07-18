@@ -200,6 +200,7 @@ export function createSessionRuntime(input: {
     messages: input.messages ?? [],
     stream: null,
     isStreaming: false,
+    isChatStreaming: false,
     lastError: null,
     isDraft: input.isDraft ?? false,
   };
@@ -229,6 +230,133 @@ export function deserializeMessages(
         parts: parts.length > 0 ? parts : undefined,
       };
     });
+}
+
+export function mergeTaskExecution(
+  messages: ReadonlyArray<Message>,
+  taskExecution: ToolExecution,
+): ReadonlyArray<Message> {
+  // 任务快照必然来自后台生产任务：恢复出的卡带 background 标记，供无 id
+  // 事件的回退路由跳过它。终态快照替换整个 execution，标记也要跟着补回来。
+  const execution: ToolExecution = taskExecution.background
+    ? taskExecution
+    : { ...taskExecution, background: true };
+  let found = false;
+  const next = messages.map((message) => {
+    const hasDirectExecution = message.toolExecutions?.some((item) => item.id === execution.id) ?? false;
+    const hasPartExecution = message.parts?.some(
+      (part) => part.type === "tool" && part.execution.id === execution.id,
+    ) ?? false;
+    if (!hasDirectExecution && !hasPartExecution) return message;
+
+    found = true;
+    const toolExecutions = hasDirectExecution
+      ? message.toolExecutions?.map((item) => item.id === execution.id ? execution : item)
+      : [...(message.toolExecutions ?? []), execution];
+    const parts = hasPartExecution
+      ? message.parts?.map((part) => (
+          part.type === "tool" && part.execution.id === execution.id
+            ? { type: "tool" as const, execution }
+            : part
+        ))
+      : [...(message.parts ?? []), { type: "tool" as const, execution }];
+    return { ...message, toolExecutions, parts };
+  });
+
+  if (found) return next;
+  return [
+    ...next,
+    {
+      role: "assistant",
+      content: "",
+      timestamp: execution.startedAt,
+      toolExecutions: [execution],
+      parts: [{ type: "tool", execution }],
+    },
+  ];
+}
+
+export function hasInFlightExecution(
+  messages: ReadonlyArray<Message>,
+  executionId: string,
+): boolean {
+  const inFlight = (execution: ToolExecution): boolean =>
+    execution.id === executionId
+    && (execution.status === "running" || execution.status === "processing");
+
+  return messages.some((message) =>
+    (message.toolExecutions?.some(inFlight) ?? false)
+    || (message.parts?.some((part) => part.type === "tool" && inFlight(part.execution)) ?? false),
+  );
+}
+
+/**
+ * 消息里是否还有任何 running/processing 的工具执行。
+ * 聊天轮结束时用它判断"后台生产任务是否还在跑"：只有全部执行都到终态，
+ * 才允许关闭 SSE 连接并把 isStreaming 置回 false。
+ */
+export function hasAnyInFlightExecution(messages: ReadonlyArray<Message>): boolean {
+  const inFlight = (execution: ToolExecution): boolean =>
+    execution.status === "running" || execution.status === "processing";
+
+  return messages.some((message) =>
+    (message.toolExecutions?.some(inFlight) ?? false)
+    || (message.parts?.some((part) => part.type === "tool" && inFlight(part.execution)) ?? false),
+  );
+}
+
+/**
+ * 按 execution id 在全部消息里定位工具卡并更新（并行聊天时任务卡挂在更早的
+ * 任务轮消息上，不能只在当前 streamTs 的消息里找）。找不到时返回 null。
+ */
+export function updateToolPartById(
+  messages: ReadonlyArray<Message>,
+  executionId: string,
+  update: (execution: ToolExecution) => ToolExecution,
+): ReadonlyArray<Message> | null {
+  let found = false;
+  const next = messages.map((message) => {
+    const hasPart = message.parts?.some(
+      (part) => part.type === "tool" && part.execution.id === executionId,
+    ) ?? false;
+    if (!hasPart) return message;
+    found = true;
+    const parts = (message.parts ?? []).map((part) => (
+      part.type === "tool" && part.execution.id === executionId
+        ? { type: "tool" as const, execution: update(part.execution) }
+        : part
+    ));
+    return { ...message, ...deriveFlat(parts), parts };
+  });
+  return found ? next : null;
+}
+
+export function markRunningToolsFailed(
+  messages: ReadonlyArray<Message>,
+  error: string,
+  completedAt = Date.now(),
+): ReadonlyArray<Message> {
+  const failExecution = (execution: ToolExecution): ToolExecution => (
+    execution.status === "running" || execution.status === "processing"
+      ? { ...execution, status: "error", error, completedAt }
+      : execution
+  );
+
+  return messages.map((message) => ({
+    ...message,
+    ...(message.toolExecutions
+      ? { toolExecutions: message.toolExecutions.map(failExecution) }
+      : {}),
+    ...(message.parts
+      ? {
+          parts: message.parts.map((part) => (
+            part.type === "tool"
+              ? { ...part, execution: failExecution(part.execution) }
+              : part
+          )),
+        }
+      : {}),
+  }));
 }
 
 function extractSessionToolExecutions(message: SessionMessage): ToolExecution[] | undefined {

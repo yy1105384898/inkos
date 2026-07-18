@@ -260,6 +260,18 @@ describe("chatCompletion via pi-ai", () => {
     expect(opts.maxTokens).toBe(256);
   });
 
+  it("passes the caller AbortSignal to pi-ai", async () => {
+    mockStreamSimple.mockReturnValue(makeTextStream("ok"));
+    const controller = new AbortController();
+
+    await chatCompletion(makeClient(), "test-model", [{ role: "user", content: "hi" }], {
+      signal: controller.signal,
+    });
+
+    const opts = mockStreamSimple.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(opts.signal).toBe(controller.signal);
+  });
+
   it("drops non-ByteString headers before calling pi-ai", async () => {
     mockStreamSimple.mockReturnValue(makeTextStream("ok"));
 
@@ -416,14 +428,18 @@ describe("chatCompletion via pi-ai", () => {
         },
       },
     });
-    const result = await chatCompletion(client, "deepseek-v4-flash", [{ role: "user", content: "nihao" }]);
+    const controller = new AbortController();
+    const result = await chatCompletion(client, "deepseek-v4-flash", [{ role: "user", content: "nihao" }], {
+      signal: controller.signal,
+    });
 
     expect(result.content).toBe("kkai ok");
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(mockCompleteSimple).not.toHaveBeenCalled();
     expect(mockStreamSimple).not.toHaveBeenCalled();
 
-    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> };
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string>; signal?: AbortSignal };
+    expect(init.signal).toBe(controller.signal);
     expect(init.headers).toMatchObject({
       Authorization: "Bearer test-key",
       "Content-Type": "application/json",

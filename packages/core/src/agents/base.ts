@@ -11,6 +11,7 @@ export interface AgentContext {
   readonly bookId?: string;
   readonly logger?: Logger;
   readonly onStreamProgress?: OnStreamProgress;
+  readonly signal?: AbortSignal;
 }
 
 export abstract class BaseAgent {
@@ -31,6 +32,7 @@ export abstract class BaseAgent {
     return chatCompletion(this.ctx.client, this.ctx.model, messages, {
       ...options,
       onStreamProgress: this.ctx.onStreamProgress,
+      signal: this.ctx.signal,
     });
   }
 
@@ -56,6 +58,7 @@ export abstract class BaseAgent {
         ...options,
         webSearch: true,
         onStreamProgress: this.ctx.onStreamProgress,
+        signal: this.ctx.signal,
       });
     }
 

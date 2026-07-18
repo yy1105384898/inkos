@@ -3,7 +3,7 @@
   <img src="assets/inkos-text.svg" width="240" height="65" alt="InkOS">
 </p>
 
-<h1 align="center">Story Creation AI Agent<br><sub>長編・短編小説、脚本、インタラクティブ影遊、IP コンテンツのための創作システム</sub></h1>
+<h1 align="center">Story Creation AI Agent<br><sub>長編・短編小説、脚本、インタラクティブ影遊、IP コンテンツ、多言語翻訳のための創作 AI Agent システム</sub></h1>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@actalk/inkos"><img src="https://img.shields.io/npm/v/@actalk/inkos.svg?color=cb3837&logo=npm" alt="npm version"></a>
@@ -26,19 +26,22 @@
 
 ---
 
-InkOS は、長編小説、独立短編、脚本、分镜、二次創作、番外、文体模倣、続き書き、インタラクティブ影遊プロジェクト、インタラクティブ世界を扱うローカル AI 創作システムです。Studio Chat、CLI、TUI は同じ action surface を共有し、相談、確認、生成、プレビュー、外部リサーチ、永続ファイル編集を一つの流れで扱えます。
+InkOS は、物語創作と多言語翻訳のための AI Agent システムです。長編小説、独立短編、脚本、絵コンテ、二次創作、番外、文体模倣、続き書き、インタラクティブ影遊、インタラクティブ世界、長文翻訳を同じワークベンチから始められます。Studio Chat、CLI、TUI は同じ action surface を共有し、相談、確認、生成、レビュー、永続編集、言語をまたぐ納品を一つの流れで扱えます。
 
-> 💡 **主要モデルをキー 1 本で** —— InkOS には [**keaiapi**](https://keaiapi.com/) の併用がおすすめです。Claude / GPT / Gemini / DeepSeek / Kimi / Qwen / GLM と画像モデルを扱える OpenAI 互換ゲートウェイとして、base URL `https://api.keaiapi.com/v1` をカスタムサービスに設定すれば、複数プロバイダーのアカウントを行き来せずに Studio でモデルを切り替えられます。
+> 💡 **主要モデルをキー 1 本で** —— InkOS には [**kkaiapi**](https://en.kkaiapi.com/) の併用がおすすめです。Claude / GPT / Gemini / DeepSeek / Kimi / Qwen / GLM と画像モデルを扱える OpenAI 互換ゲートウェイとして、base URL `https://api.kkaiapi.com/v1` をカスタムサービスに設定すれば、複数プロバイダーのアカウントを行き来せずに Studio でモデルを切り替えられます。
 
-## v1.6.2 Chat 添付、素材ライブラリ、編集可能なプロンプト
+## v1.7.0 多言語翻訳、クロスランゲージ創作、長時間タスクの信頼性
 
-v1.6.2 では Studio Chat を実際の共同制作ワークスペースに近づけました。文書、Markdown、画像をアップロードし、長い agent turn を中断し、外部素材を後から検索できる参照として保存し、長編 / Play / インタラクティブ影遊を導く prompt pack を Studio で調整できます。
+InkOS 1.7.0 は、創作、共同作業、資料の読み込み、修正、言語をまたぐ納品を同じ Agent ワークベンチにつなぎます。EPUB、テキスト型 PDF、TXT、Markdown を読み込み、自然な言葉で原文言語と翻訳先言語を指定し、章単位の翻訳、用語管理、原文と訳文の対照レビュー、完成ファイルの書き出しまで Studio で行えます。Studio Chat では、添付ファイルの読解、既存小説の取り込み、プロンプト編集、章の修正、長時間タスクの中断も引き続き利用できます。
 
-- **Chat 添付**：テキスト / Markdown は LLM の文脈に入り、画像は vision 対応モデルへマルチモーダル入力として渡されます。
-- **素材の保存と検索**：外部資料をプロジェクトの material library に保存し、後続の執筆や相談で evidence trace 付きで参照できます。
-- **編集可能な prompt pack**：**プロジェクト設定 → Prompt packs** で内蔵プロンプトを確認・上書きできます。上書きは `prompt/.../*.md` に保存され、内蔵デフォルトは変更しません。
-- **長時間タスクの中断**：モデルや provider が詰まった場合、Studio Chat から実行中の turn を停止できます。
-- **Chat からの章修訂を改善**：重写 / 修訂の依頼では、そのターンの指示が一回限りの reviser brief として渡されます。修訂が保存されない場合は、判定指標と残った問題を表示します。
+- **完全な翻訳ワークベンチ**：EPUB、テキスト型 PDF、TXT、Markdown を読み込み、章と意味段落ごとに翻訳します。用語集、レビュー報告、TXT / Markdown / EPUB 出力に対応します。
+- **Studio、Chat、CLI 共通の翻訳機能**：Studio で翻訳プロジェクトの作成、実行、対照表示、レビュー、出力が可能です。Chat の確認アクション、または CLI の `inkos translate init / run / export` からも開始できます。
+- **クロスランゲージ創作**：短編、脚本、絵コンテ、インタラクティブ影遊に英語向けプロンプト経路を追加しました。Studio の動的表示と CLI の言語フォールバックも同時に整備し、メニューの翻訳だけに留まりません。
+- **添付、素材ライブラリ、編集可能なプロンプト**：Chat はテキスト、Markdown、画像を読み取れます。外部資料は evidence trace 付きで保存・検索でき、長編、Play、インタラクティブ影遊の prompt pack は Studio で確認・調整できます。
+- **既存小説を実プロジェクトとして取り込み**：ローカルファイル、ディレクトリ、Chat 添付から章を取り込み、基礎設定を逆生成して章状態を再生します。原稿を一時的な文脈として読むだけではありません。
+- **制御可能なレビュー、修正、連続執筆**：strict / lenient / always の修正基準、プロジェクト単位・書籍単位の上書き、書籍ごとの自動 / 手動レビューに対応します。CLI に `inkos auto` と完了 / 失敗通知を追加し、修正が保存されない場合は前後の指標と未解決事項を表示します。
+- **中断可能な長時間タスクと復旧可能な書き込みロック**：停止シグナルは Agent、執筆パイプライン、モデルリクエストまで伝播します。異常終了で残ったロックは自動復旧し、実際の同時実行競合は `BOOK_BUSY` を返します。
+- **モデル、インストール、クロスプラットフォーム動作を安定化**：MiniMax の思考内容が本文に混ざらず、OpenRouter や kkaiapi などの動的サービスが静的モデル一覧に阻まれません。npm パッケージへの `workspace:*` 依存関係の漏出を修正し、操作詳細、通知、プロジェクトパスもプラットフォーム間で統一しました。
 
 ## v1.6.0 主要アップデート
 
@@ -65,6 +68,8 @@ v1.6.0 は、InkOS を開放世界 Play からさらにインタラクティブ�
 
 **長編小説** — ブリーフから書籍を作成し、基礎設定、章の意図、コンテキスト、本文、レビュー、修正、状態更新まで管理します。長編でも制御を失わないように、コンテキストは protected / compressible に分けて扱います。
 
+**物語の複数ルート予測** — 次章を書く前に、現在の正史から互いに独立した 2-5 本の未来ルートを生成し、章のビート、人物の決断、予想される変化、リスク、作者意図との一致度を Studio Chat で横並びに比較できます。ルートを採用しても保存されるのは `selected-branch-plan.md` だけで、本文、アウトライン、正史状態は変更されません。正史が変わると古い予測は stale として扱われます。
+
 **InkOS Short** — Studio Chat と CLI から独立した短編パッケージを生成できます。完成本文、アウトライン記録、レビュー記録、あらすじ、セールスポイント、表紙プロンプト、表紙画像に対応します。
 
 **InkOS Play** — 自然言語の世界契約から、開放世界や分岐型インタラクティブ物語を開始できます。時間の進み方、キャラクター agent、所持品、証拠、関係性、シーン状態、ビジュアルルール、自由行動、選択肢、画像生成に対応します。
@@ -75,7 +80,7 @@ v1.6.0 は、InkOS を開放世界 Play からさらにインタラクティブ�
 
 **Runtime Skill とリサーチ** — `.inkos/skills/` に専門 skill を追加し、`@skill-id` で強制使用できます。外部事実が必要な場合は出典付き Markdown リサーチレポートを生成できます。
 
-**モデル設定** — Studio はサービス設定、モデルルーティング、表紙サービス、[keaiapi](https://keaiapi.com/) / OpenRouter などのモデル集約入口、カスタム OpenAI-compatible エンドポイントに対応します。
+**モデル設定** — Studio はサービス設定、モデルルーティング、表紙サービス、[kkaiapi](https://en.kkaiapi.com/) / OpenRouter などのモデル集約入口、カスタム OpenAI-compatible エンドポイントに対応します。
 
 <p align="center">
   <img src="assets/play-item-warcraft.png" width="420" alt="InkOS Play アイテム画像例">
@@ -123,7 +128,7 @@ inkos
 
 Studio を開き、**モデル設定**へ進みます：
 
-1. Google Gemini、Moonshot、MiniMax、DeepSeek、keaiapi、OpenRouter、またはカスタムエンドポイントを選択。
+1. Google Gemini、Moonshot、MiniMax、DeepSeek、kkaiapi、OpenRouter、またはカスタムエンドポイントを選択。
 2. API Key を貼り付けて接続をテスト。
 3. 利用可能なモデルを選んで保存。
 4. Studio Chat または書籍ページに戻って創作を開始。
@@ -515,6 +520,7 @@ Studio の **Open World** と **Branching Interactive** は、先に書籍を作
 | `inkos short run` | 独立短編パッケージを生成 |
 | `inkos eval [id]` | 品質評価レポートを生成（`--json`、章範囲指定） |
 | `inkos consolidate [id]` | 長編の章要約を統合し、コンテキスト負荷を下げる |
+| `inkos forecast create/show/select` | 長編の非正史ルートを生成・再検証・選択。選択時は候補計画だけを保存し、正史は変更しない |
 | `inkos interact` | 外部 agent / CLI 自然言語入口（`--json`、`--message`、`--book`） |
 | `inkos config set-global` | グローバルLLM設定を設定（~/.inkos/.env） |
 | `inkos config set-model <agent> <model>` | エージェントごとのモデルオーバーライド（`--base-url`、`--provider`、`--api-key-env`） |

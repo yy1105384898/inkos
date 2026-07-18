@@ -114,6 +114,7 @@ import {
   createPlayEditTool,
   createPlayReviseTool,
   createPlayStepTool,
+  createProposeActionTool,
   createScriptCreationTool,
   createShortFictionRunTool,
   createStoryboardCreationTool,
@@ -153,6 +154,128 @@ describe("agent tools language wiring (en parity)", () => {
     expect(runShortFictionProductionMock.mock.calls[0]![0]).toMatchObject({ language: "en" });
   });
 
+  it("persists English short language and word length in the confirmation payload", async () => {
+    const result = await createProposeActionTool("en").execute("propose-short-en", {
+      action: "short_run",
+      instruction: "Write a complete English suspense short story.",
+      shortRun: {
+        direction: "an office suspense story about forged expense records",
+        language: "en",
+        chapters: 12,
+        charsPerChapter: 650,
+        cover: false,
+      },
+    } as any);
+
+    expect(result.details).toMatchObject({
+      kind: "proposed_action",
+      actionPayload: {
+        shortRun: {
+          language: "en",
+          charsPerChapter: 650,
+        },
+      },
+    });
+  });
+
+  it("records the English session language when the model omits it from shortRun", async () => {
+    const result = await createProposeActionTool("en").execute("propose-short-en-default", {
+      action: "short_run",
+      instruction: "Write a complete English suspense short story.",
+      shortRun: {
+        direction: "an office suspense story about forged expense records",
+        chapters: 12,
+        charsPerChapter: 650,
+        cover: false,
+      },
+    } as any);
+
+    expect(result.details).toMatchObject({
+      actionPayload: { shortRun: { language: "en" } },
+    });
+  });
+
+  it("lets an explicit shortRun.language=en override the zh session default in the confirmation payload", async () => {
+    const result = await createProposeActionTool("zh").execute("propose-short-zh-en", {
+      action: "short_run",
+      instruction: "用户在中文对话里要求写一篇英文办公室悬疑短篇",
+      shortRun: {
+        direction: "an English office suspense story about forged expense records",
+        language: "en",
+        chapters: 12,
+        charsPerChapter: 650,
+        cover: false,
+      },
+    } as any);
+
+    expect(result.details).toMatchObject({
+      kind: "proposed_action",
+      actionPayload: {
+        shortRun: {
+          language: "en",
+          charsPerChapter: 650,
+        },
+      },
+    });
+  });
+
+  it("does not inject a zh charsPerChapter default when a zh session confirms an en short", async () => {
+    const result = await createProposeActionTool("zh").execute("propose-short-zh-en-no-length", {
+      action: "short_run",
+      instruction: "用户在中文对话里要求写一篇英文短篇，未指定每章字数",
+      shortRun: {
+        direction: "an English office suspense story",
+        language: "en",
+        cover: false,
+      },
+    } as any);
+
+    const shortRun = (result.details as any).actionPayload.shortRun;
+    expect(shortRun.language).toBe("en");
+    expect(shortRun.charsPerChapter).toBeUndefined();
+
+    const pipeline = { createAgentContext: vi.fn(() => ({})) };
+    const tool = createShortFictionRunTool(pipeline as never, root, {
+      language: "zh",
+      actionPayload: { shortRun } as any,
+    });
+    await tool.execute("short-zh-en-no-length", { direction: "fallback direction" } as any);
+
+    const runnerOptions = runShortFictionProductionMock.mock.calls[0]![0] as any;
+    expect(runnerOptions.language).toBe("en");
+    expect(runnerOptions.charsPerChapter).toBeUndefined();
+  });
+
+  it("documents in the shortRun.language schema that the output language may differ from the conversation language", () => {
+    const parameters = createProposeActionTool("zh").parameters as any;
+    const description = parameters.properties.shortRun.properties.language.description as string;
+    expect(description).toMatch(/output language/i);
+    expect(description).toMatch(/differ from the conversation language/i);
+  });
+
+  it("lets the confirmed short payload override the project language", async () => {
+    const pipeline = { createAgentContext: vi.fn(() => ({})) };
+    const tool = createShortFictionRunTool(pipeline as never, root, {
+      language: "zh",
+      actionPayload: {
+        shortRun: {
+          direction: "an English office thriller",
+          language: "en",
+          chapters: 12,
+          charsPerChapter: 650,
+          cover: false,
+        },
+      } as any,
+    });
+
+    await tool.execute("short-payload-en", { direction: "fallback direction" } as any);
+
+    expect(runShortFictionProductionMock.mock.calls[0]![0]).toMatchObject({
+      language: "en",
+      charsPerChapter: 650,
+    });
+  });
+
   it("keeps short_fiction_run language undefined by default so the runner falls back to zh", async () => {
     const pipeline = { createAgentContext: vi.fn(() => ({})) };
     const tool = createShortFictionRunTool(pipeline as never, root);
@@ -176,6 +299,28 @@ describe("agent tools language wiring (en parity)", () => {
     expect(runScriptCreationMock.mock.calls[0]![0]).toMatchObject({ language: "en" });
     expect(runStoryboardCreationMock.mock.calls[0]![0]).toMatchObject({ language: "en" });
     expect(runInteractiveFilmCreationMock.mock.calls[0]![0]).toMatchObject({ language: "en" });
+  });
+
+  it("runs standalone production tools inside the pipeline abort scope", async () => {
+    const runWithAbortSignal = vi.fn(async (_signal: AbortSignal | undefined, task: () => Promise<unknown>) => task());
+    const pipeline = {
+      createAgentContext: vi.fn(() => ({})),
+      runWithAbortSignal,
+    };
+    const controller = new AbortController();
+
+    await createShortFictionRunTool(pipeline as never, root)
+      .execute("short-abort-1", { direction: "女频短篇 婚姻背叛 证据反杀" } as any, controller.signal);
+    await createScriptCreationTool(pipeline as never, root)
+      .execute("script-abort-1", { title: "Night Shift", instruction: "adapt into a short drama" } as any, controller.signal);
+    await createStoryboardCreationTool(pipeline as never, root)
+      .execute("storyboard-abort-1", { title: "Night Shift", instruction: "storyboard the opening" } as any, controller.signal);
+    await createInteractiveFilmCreationTool(pipeline as never, root)
+      .execute("film-abort-1", { title: "Night Shift", instruction: "make it interactive" } as any, controller.signal);
+
+    expect(runWithAbortSignal).toHaveBeenCalledTimes(4);
+    expect(runWithAbortSignal.mock.calls.every(([signal]) => signal === controller.signal)).toBe(true);
+    expect(runShortFictionProductionMock.mock.calls[0]![0]).toMatchObject({ signal: controller.signal });
   });
 
   it("exposes short_fiction_run with en language in a confirmed en short session", async () => {

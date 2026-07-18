@@ -1190,6 +1190,7 @@ export async function chatCompletion(
   options?: {
     readonly temperature?: number;
     readonly maxTokens?: number;
+    readonly signal?: AbortSignal;
     readonly webSearch?: boolean;
     readonly onStreamProgress?: OnStreamProgress;
     readonly onTextDelta?: (text: string) => void;

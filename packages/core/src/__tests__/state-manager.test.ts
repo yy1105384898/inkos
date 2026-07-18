@@ -676,6 +676,27 @@ describe("StateManager", () => {
       await release();
     });
 
+    it("does not let another StateManager in the same process reclaim an active lock", async () => {
+      const bookId = "lock-book-shared-process";
+      const otherManager = new StateManager(tempDir);
+      await mkdir(manager.bookDir(bookId), { recursive: true });
+
+      const release = await manager.acquireBookLock(bookId);
+      let competingRelease: (() => Promise<void>) | undefined;
+      try {
+        try {
+          competingRelease = await otherManager.acquireBookLock(bookId);
+        } catch (error) {
+          expect(error).toMatchObject({ code: "BOOK_BUSY" });
+          expect(String(error)).toContain(bookId);
+        }
+        expect(competingRelease).toBeUndefined();
+      } finally {
+        await competingRelease?.();
+        await release();
+      }
+    });
+
     it("allows re-acquiring lock after release", async () => {
       await mkdir(manager.bookDir("lock-book-3"), { recursive: true });
 
@@ -717,8 +738,9 @@ describe("StateManager", () => {
       const release = await manager.acquireBookLock("lock-book-self");
       expect(typeof release).toBe("function");
 
-      const lockData = await readFile(lockPath, "utf-8");
-      expect(lockData).toContain(`pid:${process.pid}`);
+      const lockData = JSON.parse(await readFile(lockPath, "utf-8")) as { pid: number; token: string };
+      expect(lockData.pid).toBe(process.pid);
+      expect(lockData.token).toBeTruthy();
 
       await release();
     });
@@ -739,14 +761,64 @@ describe("StateManager", () => {
 
       try {
         const release = await manager.acquireBookLock("lock-book-5");
-        const lockData = await readFile(lockPath, "utf-8");
+        const lockData = JSON.parse(await readFile(lockPath, "utf-8")) as { pid: number; token: string };
 
         expect(typeof release).toBe("function");
-        expect(lockData).toContain(`pid:${process.pid}`);
+        expect(lockData.pid).toBe(process.pid);
+        expect(lockData.token).toBeTruthy();
 
         await release();
       } finally {
         killSpy.mockRestore();
+      }
+    });
+
+    it("reclaims an expired lease whose recorded pid was reused by another live process", async () => {
+      const bookId = "lock-book-expired-lease";
+      await mkdir(manager.bookDir(bookId), { recursive: true });
+      const lockPath = join(manager.bookDir(bookId), ".write.lock");
+      const oldTimestamp = Date.now() - 10 * 60_000;
+      await writeFile(lockPath, JSON.stringify({
+        version: 1,
+        pid: 424243,
+        token: "abandoned-owner",
+        startedAt: oldTimestamp,
+        heartbeatAt: oldTimestamp,
+      }), "utf-8");
+
+      const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+      try {
+        const release = await manager.acquireBookLock(bookId);
+        const lockData = JSON.parse(await readFile(lockPath, "utf-8")) as {
+          pid: number;
+          token: string;
+        };
+
+        expect(lockData.pid).toBe(process.pid);
+        expect(lockData.token).not.toBe("abandoned-owner");
+        await release();
+      } finally {
+        killSpy.mockRestore();
+      }
+    });
+
+    it("refreshes the lease heartbeat while a write remains active", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+      const bookId = "lock-book-heartbeat";
+      let release: (() => Promise<void>) | undefined;
+      try {
+        release = await manager.acquireBookLock(bookId);
+        const lockPath = join(manager.bookDir(bookId), ".write.lock");
+        const before = JSON.parse(await readFile(lockPath, "utf-8")) as { heartbeatAt: number };
+
+        await vi.advanceTimersByTimeAsync(31_000);
+        await new Promise((resolveHeartbeat) => setTimeout(resolveHeartbeat, 10));
+
+        const after = JSON.parse(await readFile(lockPath, "utf-8")) as { heartbeatAt: number };
+        expect(after.heartbeatAt).toBeGreaterThan(before.heartbeatAt);
+      } finally {
+        await release?.();
+        vi.useRealTimers();
       }
     });
   });

@@ -1,9 +1,9 @@
-import { memo, useRef, useEffect, useMemo, useState, useCallback } from "react";
+import { memo, useRef, useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
 import { fetchJson, postApi, useApi } from "../hooks/use-api";
-import type { MessagePart } from "../store/chat/types";
+import type { ChatAttachmentPayload, MessagePart } from "../store/chat/types";
 import { chatSelectors, useChatStore } from "../store/chat";
 import type { ChatSessionKind } from "../store/chat";
 import { useServiceStore } from "../store/service";
@@ -21,6 +21,10 @@ import {
 import { ChatMessage } from "../components/chat/ChatMessage";
 import { QuickActions } from "../components/chat/QuickActions";
 import { ToolExecutionSteps, type ProposedActionDetails } from "../components/chat/ToolExecutionSteps";
+import {
+  buildNarrativeForecastRecheckInstruction,
+  buildNarrativeForecastSelectionInstruction,
+} from "../components/chat/NarrativeForecastPreview";
 import { ProjectArtifactDrawer } from "../components/chat/ProjectArtifactDrawer";
 import { PlayHud } from "../components/chat/PlayHud";
 import { PlayChoicePanel } from "../components/chat/PlayChoicePanel";
@@ -32,8 +36,10 @@ import {
   Check,
   Plus,
   X,
+  Paperclip,
   Gamepad2,
   Palette,
+  RotateCcw,
   Square,
 } from "lucide-react";
 import { Shimmer } from "../components/ai-elements/shimmer";
@@ -103,6 +109,51 @@ interface CoverConfigResponse {
   readonly service?: string | null;
   readonly configured?: boolean;
   readonly providers?: ReadonlyArray<{ readonly service: string; readonly connected?: boolean }>;
+}
+
+const MAX_CHAT_ATTACHMENTS = 8;
+const MAX_CHAT_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const CHAT_ATTACHMENT_ACCEPT = [
+  "image/*",
+  "text/plain",
+  "text/markdown",
+  "application/json",
+  "text/csv",
+  ".txt",
+  ".md",
+  ".markdown",
+  ".json",
+  ".csv",
+  ".tsv",
+  ".yaml",
+  ".yml",
+  ".log",
+  ".pdf",
+].join(",");
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function serializeChatAttachments(files: ReadonlyArray<File>): Promise<ChatAttachmentPayload[]> {
+  return Promise.all(files.map(async (file) => ({
+    id: `${file.name}-${file.size}-${file.lastModified}`,
+    filename: file.name,
+    mediaType: file.type || "application/octet-stream",
+    size: file.size,
+    dataUrl: await fileToDataUrl(file),
+  })));
+}
+
+function formatFileSize(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.ceil(size / 1024)} KB`;
+  return `${size} B`;
 }
 
 interface SkillsResponse {
@@ -368,11 +419,15 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const input = useChatStore((s) => s.input);
   const loading = useChatStore(chatSelectors.isActiveSessionStreaming);
+  const chatStreaming = useChatStore(chatSelectors.isActiveSessionChatStreaming);
+  const lastFailedSend = useChatStore(chatSelectors.activeSessionLastFailedSend);
   const selectedModel = useChatStore((s) => s.selectedModel);
   const selectedService = useChatStore((s) => s.selectedService);
   // -- Store actions --
   const setInput = useChatStore((s) => s.setInput);
   const sendMessage = useChatStore((s) => s.sendMessage);
+  const retryLastSend = useChatStore((s) => s.retryLastSend);
+  const abortSession = useChatStore((s) => s.abortSession);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
   const loadSessionList = useChatStore((s) => s.loadSessionList);
   const createSession = useChatStore((s) => s.createSession);
@@ -380,11 +435,11 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const loadSessionDetail = useChatStore((s) => s.loadSessionDetail);
   const activateSession = useChatStore((s) => s.activateSession);
   const setSessionPlayMode = useChatStore((s) => s.setSessionPlayMode);
-  const stopMessage = useChatStore((s) => s.stopMessage);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<ScrollFrameId | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const autoScrollPinnedRef = useRef(true);
 
   const isZh = t("nav.connected") === "\u5DF2\u8FDE\u63A5";
@@ -424,6 +479,8 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   const [skillSaving, setSkillSaving] = useState(false);
   const [skillCreateError, setSkillCreateError] = useState<string | null>(null);
   const [showSkillCreate, setShowSkillCreate] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const { data: skillsData, loading: skillsLoading, error: skillsError, refetch: refetchSkills } = useApi<SkillsResponse>("/skills");
   const worldPanelInsetClass = currentSessionKind === "play" && worldPanelOpen ? "lg:pr-[380px]" : "";
   const availableSkills = skillsData?.skills ?? [];
@@ -502,12 +559,12 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
   }, [services, modelsByService]);
 
   const selectedModelLabel = useMemo(() => {
-    if (!selectedModel) return "选择模型";
+    if (!selectedModel) return isZh ? "选择模型" : "Select model";
     const group = groupedModels.find((item) => item.service === selectedService);
     const model = group?.models.find((item) => item.id === selectedModel);
     const modelLabel = model?.name ?? selectedModel;
     return group ? `${group.label} · ${modelLabel}` : modelLabel;
-  }, [groupedModels, selectedModel, selectedService]);
+  }, [groupedModels, selectedModel, selectedService, isZh]);
 
   // Auto-select from saved service config first, then fall back to the first available model.
   useEffect(() => {
@@ -519,14 +576,9 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
       configuredModelSelection,
     );
     if (nextSelection) {
-      setSelectedModel(nextSelection.model, nextSelection.service, { persist: false });
+      setSelectedModel(nextSelection.model, nextSelection.service);
     }
   }, [configuredModelSelection, groupedModels, selectedModel, selectedService, serviceConfigLoaded, setSelectedModel]);
-
-  const handleModelSelect = useCallback((model: string, service: string) => {
-    setConfiguredModelSelection({ model, service });
-    setSelectedModel(model, service);
-  }, [setSelectedModel]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -644,17 +696,50 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     };
   }, [activeBookId, activateSession, createSession, loadSessionDetail, loadSessionList, mode]);
 
-  const onSend = (text: string) => {
+  const addAttachedFiles = (files: FileList | File[]) => {
+    const incoming = Array.from(files);
+    const accepted: File[] = [];
+    const rejected: string[] = [];
+    for (const file of incoming) {
+      if (file.size > MAX_CHAT_ATTACHMENT_BYTES) {
+        rejected.push(`${file.name} > ${formatFileSize(MAX_CHAT_ATTACHMENT_BYTES)}`);
+        continue;
+      }
+      accepted.push(file);
+    }
+    setAttachedFiles((prev) => [...prev, ...accepted].slice(0, MAX_CHAT_ATTACHMENTS));
+    setAttachmentError(rejected.length > 0
+      ? (isZh ? `以下文件过大，未添加：${rejected.join("、")}` : `Some files were too large: ${rejected.join(", ")}`)
+      : null);
+  };
+
+  const onSend = async (text: string) => {
     if (!activeSessionId) return;
-    if (!text.trim()) return;
+    const hasPendingMessage = Boolean(text.trim()) || attachedFiles.length > 0;
+    if (!hasPendingMessage) {
+      // 停止按钮按对象分语义：聊天轮流式中只停聊天轮（后台任务继续跑）；
+      // 只有后台任务在跑时才停任务（旧行为）。
+      if (chatStreaming) await abortSession(activeSessionId, "chat");
+      else if (loading) await abortSession(activeSessionId);
+      return;
+    }
     const requestedSkills = selectedSkillIdsForSend(selectedSkillIds);
     autoScrollPinnedRef.current = true;
-    void sendMessage(activeSessionId, text, {
+    const attachments = await serializeChatAttachments(attachedFiles);
+    if (chatStreaming) {
+      // 聊天轮流式中再发消息：先停当前聊天轮（不动后台任务）再发送。
+      // 只有后台任务在跑时直接发送，不中止任务。
+      await abortSession(activeSessionId, "chat");
+    }
+    await sendMessage(activeSessionId, text, {
       activeBookId,
       sessionKind: currentSessionKind,
       actionSource: "free-text",
       requestedSkills,
+      attachments,
     });
+    setAttachedFiles([]);
+    setAttachmentError(null);
     if (requestedSkills?.length) {
       setSelectedSkillIds([]);
       setSkillPanelOpen(false);
@@ -732,16 +817,42 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
     markProposalResolved(details.execId, "rejected");
     if (!activeSessionId) return;
     autoScrollPinnedRef.current = true;
-    await sendMessage(activeSessionId, `取消这次操作：${details.title ?? details.instruction}`, {
+    const rejectionText = isZh
+      ? `取消这次操作：${details.title ?? details.instruction}`
+      : `Cancel this action: ${details.title ?? details.instruction}`;
+    await sendMessage(activeSessionId, rejectionText, {
       activeBookId,
       sessionKind: currentSessionKind,
       actionSource: "button",
     });
   };
 
-  const handleStop = () => {
-    if (!activeSessionId) return;
-    void stopMessage(activeSessionId);
+  const handleSelectNarrativeBranch = async (forecastId: string, branchId: string) => {
+    if (!activeSessionId || !activeBookId) return;
+    autoScrollPinnedRef.current = true;
+    await sendMessage(
+      activeSessionId,
+      buildNarrativeForecastSelectionInstruction(forecastId, branchId, isZh ? "zh" : "en"),
+      {
+        activeBookId,
+        sessionKind: "book",
+        actionSource: "button",
+      },
+    );
+  };
+
+  const handleRecheckNarrativeForecast = async (forecastId: string) => {
+    if (!activeSessionId || !activeBookId) return;
+    autoScrollPinnedRef.current = true;
+    await sendMessage(
+      activeSessionId,
+      buildNarrativeForecastRecheckInstruction(forecastId, isZh ? "zh" : "en"),
+      {
+        activeBookId,
+        sessionKind: "book",
+        actionSource: "button",
+      },
+    );
   };
 
   useEffect(() => { setPlayImageError(null); }, [activeSessionId]);
@@ -908,6 +1019,8 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                               onProposedAction={handleProposedAction}
                               onRejectProposedAction={handleRejectProposedAction}
                               onOpenFilmStudio={nav.toFilmStudio}
+                              onSelectNarrativeBranch={handleSelectNarrativeBranch}
+                              onRecheckNarrativeForecast={handleRecheckNarrativeForecast}
                             />
                           );
                         }
@@ -984,6 +1097,25 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
           />
         </div>
       )}
+      {/* 重试上一条失败的聊天消息（issue #335）：只针对聊天轮失败；
+          后台生产任务的失败由任务卡自己展示，不在这里出现。 */}
+      {lastFailedSend && !chatStreaming && activeSessionId ? (
+        <div className={`shrink-0 transition-[padding] duration-200 ${worldPanelInsetClass}`}>
+          <div className="max-w-3xl mx-auto w-full px-4 pb-2">
+            <button
+              type="button"
+              onClick={() => {
+                autoScrollPinnedRef.current = true;
+                void retryLastSend(activeSessionId);
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-border/50 bg-secondary/30 px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary"
+            >
+              <RotateCcw size={14} />
+              {isZh ? "重试上一条消息" : "Retry last message"}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {needsPlayModeChoice ? null : (
       <div className={`shrink-0 border-t border-border/40 px-4 py-3 transition-[padding] duration-200 ${worldPanelInsetClass}`}>
         <div className="max-w-3xl mx-auto">
@@ -1009,6 +1141,17 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                   }}
                 />
               ) : null}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={CHAT_ATTACHMENT_ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  if (event.currentTarget.files) addAttachedFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
               {selectedSkills.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5 border-b border-border/20 px-3 py-2">
                   {selectedSkills.map((skill) => (
@@ -1029,6 +1172,35 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                   ))}
                 </div>
               ) : null}
+              {attachedFiles.length > 0 || attachmentError ? (
+                <div className="border-b border-border/20 px-3 py-2">
+                  {attachedFiles.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {attachedFiles.map((file) => (
+                        <span
+                          key={`${file.name}-${file.size}-${file.lastModified}`}
+                          className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full border border-border/50 bg-secondary/60 px-2.5 py-1 text-xs text-muted-foreground"
+                          title={`${file.name} · ${file.type || "application/octet-stream"} · ${formatFileSize(file.size)}`}
+                        >
+                          <Paperclip size={12} />
+                          <span className="truncate">{file.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setAttachedFiles((prev) => prev.filter((item) => item !== file))}
+                            className="rounded-full p-0.5 hover:bg-muted"
+                            aria-label={isZh ? `移除 ${file.name}` : `Remove ${file.name}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {attachmentError ? (
+                    <div className="mt-1 text-xs leading-5 text-destructive">{attachmentError}</div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="flex items-center gap-2 px-3 py-2">
                 <button
                   type="button"
@@ -1040,41 +1212,41 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                 >
                   <Plus size={16} strokeWidth={2.4} />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!activeSessionId}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-30"
+                  title={isZh ? "上传图片或资料" : "Attach files"}
+                  aria-label={isZh ? "上传图片或资料" : "Attach files"}
+                >
+                  <Paperclip size={16} strokeWidth={2.3} />
+                </button>
                 <textarea
                   ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(input); } }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void onSend(input); } }}
                   placeholder={isZh ? "输入指令..." : "Enter command..."}
-                  disabled={loading || !activeSessionId}
+                  disabled={!activeSessionId}
                   rows={1}
                   className="flex-1 bg-transparent text-base leading-7 placeholder:text-muted-foreground/50 outline-none! border-none! ring-0! shadow-none focus:outline-none! focus:ring-0! focus:border-none! resize-none disabled:opacity-50 max-h-[200px] overflow-y-auto"
                 />
-                {loading ? (
-                  <button
-                    type="button"
-                    onClick={handleStop}
-                    disabled={!activeSessionId}
-                    title={isZh ? "停止生成" : "Stop generation"}
-                    aria-label={isZh ? "停止生成" : "Stop generation"}
-                    className="w-8 h-8 rounded-lg bg-destructive text-destructive-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-destructive/20"
-                  >
-                    <Square size={13} fill="currentColor" strokeWidth={2.5} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onSend(input)}
-                    disabled={!input.trim() || !activeSessionId}
-                    className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-primary/20"
-                  >
-                    <ArrowUp size={14} strokeWidth={2.5} />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => void onSend(input)}
+                  disabled={(!input.trim() && attachedFiles.length === 0 && !loading) || !activeSessionId}
+                  className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-primary/20"
+                  title={loading && !input.trim() && attachedFiles.length === 0 ? (isZh ? "停止当前回复" : "Stop") : undefined}
+                >
+                  {loading && !input.trim() && attachedFiles.length === 0
+                    ? <Square size={13} fill="currentColor" />
+                    : <ArrowUp size={14} strokeWidth={2.5} />}
+                </button>
               </div>
               <div className="flex items-center gap-2 px-3 pb-2 border-t border-border/20 pt-1.5">
                 {modelPickerStatus === "loading" ? (
-                  <span className="text-[15px] text-muted-foreground/40 animate-pulse">加载模型...</span>
+                  <span className="text-[15px] text-muted-foreground/40 animate-pulse">{isZh ? "加载模型..." : "Loading models..."}</span>
                 ) : modelPickerStatus === "ready" ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger className="flex items-center gap-1.5 px-2 py-1.5 rounded-md hover:bg-muted text-[16px] transition-colors cursor-pointer">
@@ -1087,7 +1259,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                       groupedModels={groupedModels}
                       selectedModel={selectedModel}
                       selectedService={selectedService}
-                      onSelect={handleModelSelect}
+                      onSelect={setSelectedModel}
                       onManage={() => nav.toServices()}
                     />
                   </DropdownMenu>
@@ -1096,7 +1268,7 @@ export function ChatPage({ activeBookId, mode = activeBookId ? "book" : "book-cr
                     onClick={() => nav.toServices()}
                     className="text-[15px] text-muted-foreground/50 hover:text-primary transition-colors"
                   >
-                    配置模型 →
+                    {isZh ? "配置模型 →" : "Set up models →"}
                   </button>
                 )}
                 {currentSessionKind === "play" && (

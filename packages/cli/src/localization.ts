@@ -443,3 +443,102 @@ export function formatFanficCanonMissingError(): string {
 export function formatFanficSourceDirEmptyError(sourcePath: string): string {
   return `No .txt or .md files found in ${sourcePath}（目录 ${sourcePath} 中没有 .txt 或 .md 文件）`;
 }
+
+export function formatChapterSyncNoChanges(language: CliLanguage, checked: number): string {
+  return localize(language, {
+    zh: `已核对 ${checked} 章，index.json 字数无需修正。`,
+    en: `Checked ${checked} chapter(s); index.json word counts already match the files.`,
+  });
+}
+
+export function formatChapterSyncChange(
+  language: CliLanguage,
+  change: { number: number; title: string; previousWordCount: number; wordCount: number },
+  countingMode: "zh_chars" | "en_words",
+): string {
+  const from = formatLengthCount(change.previousWordCount, countingMode);
+  const to = formatLengthCount(change.wordCount, countingMode);
+  return localize(language, {
+    zh: `  第${change.number}章 ${change.title}：${from} → ${to}`,
+    en: `  Chapter ${change.number} ${change.title}: ${from} → ${to}`,
+  });
+}
+
+export function formatChapterSyncSummary(language: CliLanguage, changed: number, checked: number): string {
+  return localize(language, {
+    zh: `已核对 ${checked} 章，修正了 ${changed} 章的 index.json 字数。`,
+    en: `Checked ${checked} chapter(s); corrected ${changed} index.json word count(s).`,
+  });
+}
+
+export function formatChapterSyncMissingFiles(language: CliLanguage, numbers: ReadonlyArray<number>): string {
+  return localize(language, {
+    zh: `警告：index.json 中的第 ${numbers.join("、")} 章找不到对应的章节文件，已跳过。`,
+    en: `Warning: chapter(s) ${numbers.join(", ")} exist in index.json but have no chapter file on disk; skipped.`,
+  });
+}
+
+export function formatChapterDeleteConfirm(
+  language: CliLanguage,
+  params: { bookTitle: string; bookId: string; number: number; title: string },
+): string {
+  return localize(language, {
+    zh: `将删除《${params.bookTitle}》(${params.bookId}) 的最新章：第${params.number}章 ${params.title}。`
+      + `章节文件会移入 chapters/.trash/，索引和故事状态回滚到第${params.number - 1}章。确认删除？(y/N) `,
+    en: `Delete the latest chapter of "${params.bookTitle}" (${params.bookId}): chapter ${params.number} ${params.title}? `
+      + `The chapter file moves to chapters/.trash/ and the index and story state roll back to chapter ${params.number - 1}. (y/N) `,
+  });
+}
+
+export function formatChapterDeleteCancelled(language: CliLanguage): string {
+  return localize(language, {
+    zh: "已取消。",
+    en: "Cancelled.",
+  });
+}
+
+export function formatChapterDeleteDone(
+  language: CliLanguage,
+  params: { number: number; title: string; trashedFiles: ReadonlyArray<string>; rolledBackTo: number },
+): string {
+  const trashNote = params.trashedFiles.length > 0
+    ? params.trashedFiles.join(", ")
+    : localize(language, { zh: "（章节文件已不存在，未移动）", en: "(chapter file was already gone; nothing moved)" });
+  return localize(language, {
+    zh: `已删除第${params.number}章 ${params.title}：章节文件保留在 ${trashNote}，索引和故事状态已回滚到第${params.rolledBackTo}章。`,
+    en: `Deleted chapter ${params.number} ${params.title}: chapter file kept at ${trashNote}; index and story state rolled back to chapter ${params.rolledBackTo}.`,
+  });
+}
+
+export function formatBookBackupCreated(language: CliLanguage, bookId: string, backupId: string): string {
+  return localize(language, {
+    zh: `已备份 ${bookId} → .inkos/backups/${bookId}/${backupId}/`,
+    en: `Backed up ${bookId} → .inkos/backups/${bookId}/${backupId}/`,
+  });
+}
+
+export function formatBookBackupListEmpty(language: CliLanguage, bookId: string): string {
+  return localize(language, {
+    zh: `${bookId} 还没有备份。用 inkos book backup ${bookId} 创建一份。`,
+    en: `No backups for ${bookId} yet. Create one with: inkos book backup ${bookId}`,
+  });
+}
+
+export function formatBookRestoreDone(
+  language: CliLanguage,
+  params: { bookId: string; backupId: string; preRestoreBackupId: string | null },
+): string {
+  const preNote = params.preRestoreBackupId
+    ? localize(language, {
+        zh: `恢复前的状态已自动备份为 ${params.preRestoreBackupId}。`,
+        en: `The pre-restore state was automatically backed up as ${params.preRestoreBackupId}.`,
+      })
+    : localize(language, {
+        zh: "书目录当时不存在，未创建恢复前备份。",
+        en: "The book directory did not exist, so no pre-restore backup was created.",
+      });
+  return localize(language, {
+    zh: `已把 ${params.bookId} 恢复到备份 ${params.backupId}。${preNote}`,
+    en: `Restored ${params.bookId} to backup ${params.backupId}. ${preNote}`,
+  });
+}

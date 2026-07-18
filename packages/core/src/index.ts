@@ -364,6 +364,9 @@ export {
   SHORT_FICTION_DEFAULT_CHARS_PER_CHAPTER,
   SHORT_FICTION_MIN_CHARS_PER_CHAPTER,
   SHORT_FICTION_MAX_CHARS_PER_CHAPTER,
+  SHORT_FICTION_EN_DEFAULT_WORDS_PER_CHAPTER,
+  SHORT_FICTION_EN_MIN_WORDS_PER_CHAPTER,
+  SHORT_FICTION_EN_MAX_WORDS_PER_CHAPTER,
   ShortFictionOutlineAgent,
   ShortFictionOutlineReviewerAgent,
   ShortFictionOutlineReviserAgent,
@@ -379,6 +382,7 @@ export {
   type ShortFictionChapter,
   type ShortFictionSalesPackage,
   type ShortFictionReference,
+  type ShortFictionLanguage,
 } from "./agents/short-fiction.js";
 export {
   generateShortFictionCover,
@@ -391,6 +395,46 @@ export {
   type ShortFictionRunResult,
   type ShortFictionRunRuntimes,
 } from "./pipeline/short-fiction-runner.js";
+
+// Narrative forecast (issue #342): non-canonical multi-branch story projection
+export {
+  FORECAST_MIN_BRANCHES,
+  FORECAST_MAX_BRANCHES,
+  FORECAST_DEFAULT_BRANCHES,
+  FORECAST_MIN_HORIZON,
+  FORECAST_MAX_HORIZON,
+  FORECAST_DEFAULT_HORIZON,
+  NarrativeForecastSchema,
+  ForecastBranchSchema,
+  parseForecastModelOutput,
+  type NarrativeForecast,
+  type ForecastBranch,
+  type ForecastBeat,
+  type ForecastRisk,
+  type ForecastStatus,
+  type ForecastModelOutput,
+} from "./forecast/schema.js";
+export { ForecastStore, assertSafeForecastId, type ForecastStoreOptions } from "./forecast/store.js";
+export {
+  buildForecastContext,
+  computeContextFingerprint,
+  renderForecastContextMarkdown,
+  type ForecastContext,
+  type ForecastContextSections,
+} from "./forecast/context-builder.js";
+export { NarrativeForecastAgent, type ForecastGenerationInput } from "./forecast/agent.js";
+export { renderForecastComparisonMarkdown, renderSelectedBranchPlanMarkdown } from "./forecast/render.js";
+export {
+  createNarrativeForecast,
+  getNarrativeForecast,
+  selectNarrativeBranch,
+  type CreateNarrativeForecastOptions,
+  type GetNarrativeForecastOptions,
+  type SelectNarrativeBranchOptions,
+  type NarrativeForecastCreateResult,
+  type NarrativeForecastGetResult,
+  type NarrativeForecastSelectResult,
+} from "./forecast/runner.js";
 
 // Agent (pi-agent integration)
 export * from "./agent/index.js";
@@ -513,7 +557,9 @@ export {
 } from "./agent/agent-tools.js";
 
 // State
-export { StateManager } from "./state/manager.js";
+export { BookWriteLockError, StateManager } from "./state/manager.js";
+export { syncChapterWordCounts, type ChapterWordCountChange, type ChapterWordSyncDeps, type ChapterWordSyncResult } from "./state/chapter-word-sync.js";
+export { deleteLatestChapter, type ChapterDeleteDeps, type DeleteLatestChapterOptions, type DeleteLatestChapterResult } from "./state/chapter-delete.js";
 export { bootstrapStructuredStateFromMarkdown } from "./state/state-bootstrap.js";
 export { renderCurrentStateProjection, renderHooksProjection, renderChapterSummariesProjection } from "./state/state-projections.js";
 export { applyRuntimeStateDelta, type RuntimeStateSnapshot } from "./state/state-reducer.js";
