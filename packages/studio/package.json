@@ -35,7 +35,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit"
   },
   "dependencies": {
-    "@actalk/inkos-core": "1.7.1",
+    "@actalk/inkos-core": "workspace:*",
     "@base-ui/react": "^1.3.0",
     "@capacitor/android": "^8.3.4",
     "@capacitor/core": "^8.3.4",
